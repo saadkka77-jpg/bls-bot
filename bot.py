@@ -236,4 +236,4 @@ async def reset_days(ctx, member: discord.Member):
         save_data()
         await ctx.send(f"✅ تم تصفير بيانات {member.mention}.", delete_after=5)
 
-bot.run("DISCORD_TOKEN")
+bot.run(TOKEN)
