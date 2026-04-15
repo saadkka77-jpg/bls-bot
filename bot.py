@@ -180,8 +180,6 @@ async def on_ready():
     if not check_expirations.is_running(): check_expirations.start()
     print(f'Logged in as {bot.user.name}')
 
-# --- أوامر الإدارة (الإنذارات وتصفير الأيام) ---
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setup_vacation(ctx):
@@ -202,7 +200,8 @@ async def giveaway(ctx):
 async def unwarn(ctx, member: discord.Member):
     await ctx.message.delete()
     role = ctx.guild.get_role(WARNING_ROLE_ID)
-    if role in member.roles: await member.remove_roles(role)
+    if role and role in member.roles: 
+        await member.remove_roles(role)
     if str(member.id) in data:
         data[str(member.id)]["warning_expiry"] = None
         save_data()
