@@ -4,9 +4,10 @@ import datetime
 import json
 import asyncio
 import random
+import os
 
-# --- الإعدادات (ثوابت) ---
-TOKEN = 'MTQ5MjQ4NTkxOTk5Mzc2MTg1Mg.GW7FL9.1xGu4jLQpKokfo19fBahymXJv-BgaYrI_9-i7c'
+# --- الإعدادات (سحب البيانات من Render) ---
+TOKEN = os.getenv('DISCORD_TOKEN') 
 LOG_ROOM_ID = 1490820000477610036
 WARNING_ROOM_ID = 1480389401535189065
 VACATION_ROLE_ID = 1492607429249339502
@@ -30,14 +31,11 @@ class GiveawayModal(discord.ui.Modal, title="إعداد القيف اوي"):
             embed.description = f"{self.description.value}\n\n**ينتهي السحب:** <t:{timestamp}:R>"
             embed.set_footer(text="اضغط على الزر أدناه للمشاركة!")
 
-            # رسالة تأكيد مخفية وحذف أمر الإعداد
-            await interaction.response.send_message("✅ جاري إرسال القيف اوي وإغلاق لوحة الإعداد...", ephemeral=True)
+            await interaction.response.send_message("✅ جاري إرسال القيف اوي...", ephemeral=True)
             msg = await interaction.channel.send(embed=embed, view=GiveawayView())
 
-            # بدء وقت السحب التلقائي
             await asyncio.sleep(minutes * 60)
             await end_giveaway_action(msg, self.prize.value)
-
         except ValueError:
             await interaction.response.send_message("❌ يرجى إدخال رقم صحيح للدقائق.", ephemeral=True)
 
@@ -50,7 +48,6 @@ class GiveawayView(discord.ui.View):
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id in self.participants:
             return await interaction.response.send_message("❌ أنت مشارك بالفعل!", ephemeral=True)
-
         self.participants.append(interaction.user.id)
         button.label = f"({len(self.participants)}) مشاركات"
         await interaction.response.edit_message(view=self)
@@ -58,19 +55,14 @@ class GiveawayView(discord.ui.View):
 async def end_giveaway_action(message, prize_name):
     view = discord.ui.View.from_message(message)
     participants = []
-    # محاولة الحصول على المشاركين من الـ View النشطة
     for item in view.children:
         if item.custom_id == "join_gv_unique":
-            # نعتمد على القائمة المخزنة في الكلاس
             participants = getattr(view, 'participants', [])
-
     if not participants:
         await message.channel.send(f"😕 انتهى السحب على **{prize_name}** ولكن لم يشارك أحد.")
     else:
         winner_id = random.choice(participants)
         await message.channel.send(f"🎊 مبروك <@{winner_id}>! لقد فزت بـ **{prize_name}** 🎉")
-
-    # حذف رسالة القيف اوي بعد إعلان الفائز
     try: await message.delete()
     except: pass
 
@@ -80,7 +72,7 @@ class GiveawaySetupBtn(discord.ui.View):
     async def start_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GiveawayModal())
 
-# --- نظام الإجازات الصارم ---
+# --- نظام الإجازات ---
 class VacationPanel(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
     @discord.ui.button(label="أخذ إجازة", style=discord.ButtonStyle.success, emoji="📝", custom_id="take_vacation")
@@ -98,18 +90,14 @@ class VacationPanel(discord.ui.View):
         now = datetime.datetime.now()
         start_time = datetime.datetime.fromtimestamp(data[user_id]["leave_start"])
         diff = (now - start_time).total_seconds()
-
-        # حساب عدد مرات السحب
         data[user_id]["cancel_count"] = data[user_id].get("cancel_count", 0) + 1
         should_warn, reason = False, ""
 
-        # الشرط الأول: سحب بعد 24 ساعة
         if diff > 86400:
             should_warn, reason = True, "سحب إجازة بعد مرور 24 ساعة"
-        # الشرط الثاني: سحب مرتين ورا بعض (الاستهبال)
         elif data[user_id]["cancel_count"] >= 2:
             should_warn, reason = True, "تكرار طلب وسحب الإجازة (للمرة الثانية)"
-            data[user_id]["cancel_count"] = 0 # تصفير العداد بعد العقوبة
+            data[user_id]["cancel_count"] = 0
 
         if should_warn:
             data[user_id]["warning_expiry"] = (now + datetime.timedelta(days=5)).timestamp()
@@ -118,7 +106,6 @@ class VacationPanel(discord.ui.View):
         await interaction.user.remove_roles(interaction.guild.get_role(VACATION_ROLE_ID))
         data[user_id]["on_leave"] = False
         save_data()
-
         log_ch = bot.get_channel(LOG_ROOM_ID)
         if log_ch: await log_ch.send(embed=discord.Embed(title="⚠️ سحب إجازة", description=f"الموظف: {interaction.user.mention}", color=0xffa500))
         await interaction.response.send_message("⚠️ تم سحب الإجازة بنجاح.", ephemeral=True)
@@ -139,7 +126,6 @@ class LeaveModal(discord.ui.Modal, title="طلب إجازة"):
         user_info["days_used"] += d
         data[user_id] = user_info
         save_data()
-
         await interaction.user.add_roles(interaction.guild.get_role(VACATION_ROLE_ID))
         log_ch = bot.get_channel(LOG_ROOM_ID)
         if log_ch: await log_ch.send(embed=discord.Embed(title="✅ طلب إجازة جديد", description=f"الموظف: {interaction.user.mention}\nالمدة: {d} يوم", color=0x00ff00))
@@ -158,11 +144,11 @@ bot = MyBot()
 data = {}
 
 def save_data():
-    with open('bot_data.json', 'w') as f: json.dump(data, f)
+    with open('data.json', 'w') as f: json.dump(data, f)
 def load_data():
     global data
     try:
-        with open('bot_data.json', 'r') as f: data = json.load(f)
+        with open('data.json', 'r') as f: data = json.load(f)
     except: data = {}
 
 async def issue_warning(member, reason, days):
@@ -193,6 +179,8 @@ async def on_ready():
     load_data()
     if not check_expirations.is_running(): check_expirations.start()
     print(f'Logged in as {bot.user.name}')
+
+# --- أوامر الإدارة (الإنذارات وتصفير الأيام) ---
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -230,4 +218,4 @@ async def reset_days(ctx, member: discord.Member):
         save_data()
         await ctx.send(f"✅ تم تصفير بيانات {member.mention}.", delete_after=5)
 
-bot.run('MTQ5MjQ4NTkxOTk5Mzc2MTg1Mg.GW7FL9.1xGu4jLQpKokfo19fBahymXJv-BgaYrI_9-i7c')
+bot.run(TOKEN)
