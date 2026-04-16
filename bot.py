@@ -1,6 +1,14 @@
 from flask import Flask
 from threading import Thread
+import discord
+from discord.ext import commands, tasks
+import datetime
+import json
+import asyncio
+import random
+import os
 
+# --- نظام الويب للبقاء حياً (Keep Alive) ---
 app = Flask('')
 
 @app.route('/')
@@ -14,19 +22,11 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# استدعاء الوظيفة قبل bot.run
 keep_alive()
 
-import discord
-from discord.ext import commands, tasks
-import datetime
-import json
-import asyncio
-import random
-import os
-
 # --- الإعدادات (سحب البيانات من Render) ---
-TOKEN = os.getenv('DISCORD_TOKEN') 
+# ملاحظة: تأكد أن اسم المتغير في Render هو TOKEN
+TOKEN = os.getenv('TOKEN') 
 LOG_ROOM_ID = 1490820000477610036
 WARNING_ROOM_ID = 1480389401535189065
 VACATION_ROLE_ID = 1492607429249339502
@@ -150,11 +150,12 @@ class LeaveModal(discord.ui.Modal, title="طلب إجازة"):
         if log_ch: await log_ch.send(embed=discord.Embed(title="✅ طلب إجازة جديد", description=f"الموظف: {interaction.user.mention}\nالمدة: {d} يوم", color=0x00ff00))
         await interaction.response.send_message(f"✅ تم قبول إجازتك لمدة {d} أيام.", ephemeral=True)
 
+# --- إعداد البوت الأساسي ---
 class MyBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.members, intents.message_content = True, True
+        intents = discord.Intents.all() # تفعيل جميع الصلاحيات لضمان عمل الأنظمة
         super().__init__(command_prefix='!', intents=intents)
+    
     async def setup_hook(self):
         self.add_view(VacationPanel())
         self.add_view(GiveawayView())
@@ -162,10 +163,14 @@ class MyBot(commands.Bot):
 bot = MyBot()
 data = {}
 
+# --- إدارة البيانات ---
 def save_data():
     with open('data.json', 'w') as f: json.dump(data, f)
+
 def load_data():
     global data
+    if not os.path.exists('data.json'):
+        with open('data.json', 'w') as f: json.dump({}, f)
     try:
         with open('data.json', 'r') as f: data = json.load(f)
     except: data = {}
@@ -199,6 +204,7 @@ async def on_ready():
     if not check_expirations.is_running(): check_expirations.start()
     print(f'Logged in as {bot.user.name}')
 
+# --- الأوامر الإدارية ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setup_vacation(ctx):
@@ -236,4 +242,8 @@ async def reset_days(ctx, member: discord.Member):
         save_data()
         await ctx.send(f"✅ تم تصفير بيانات {member.mention}.", delete_after=5)
 
-bot.run(TOKEN)
+# تشغيل البوت
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("Error: No Token found! Check your Render Environment Variables.")
