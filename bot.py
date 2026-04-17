@@ -1,249 +1,277 @@
-from flask import Flask
-from threading import Thread
 import discord
 from discord.ext import commands, tasks
+from flask import Flask
+from threading import Thread
 import datetime
 import json
-import asyncio
 import random
 import os
+import asyncio
 
-# --- نظام الويب للبقاء حياً (Keep Alive) ---
+# --- نظام الويب للبقاء حياً ---
 app = Flask('')
-
 @app.route('/')
-def home():
-    return "I'm alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
+def home(): return "I'm alive!"
+def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive():
     t = Thread(target=run)
     t.start()
-
 keep_alive()
 
-# --- الإعدادات (سحب البيانات من Render) ---
-# ملاحظة: تأكد أن اسم المتغير في Render هو TOKEN
-TOKEN = os.getenv('TOKEN') 
-LOG_ROOM_ID = 1490820000477610036
+# --- الإعدادات والمعرفات ---
+TOKEN = os.getenv('TOKEN')
+LOG_TICKET_ID = 1480456866613170267
+TICKET_SETUP_CHANNEL = 1481127399042322582
 WARNING_ROOM_ID = 1480389401535189065
+LOG_VACATION_ID = 1490820000477610036
 VACATION_ROLE_ID = 1492607429249339502
 WARNING_ROLE_ID = 1493332501811171470
-GIVEAWAY_CHANNEL_ID = 1485968828059091016
-LEAVE_CHANNEL_ID = 1490070238270718013
+BANNER_URL = "https://cloud-388m17uha-static-dot-nodes-site.googleusercontent.com/static.png" # رابط الصورة المرفوعة
 
-# --- نظام القيف اوي الأوتوماتيكي ---
-class GiveawayModal(discord.ui.Modal, title="إعداد القيف اوي"):
-    prize = discord.ui.TextInput(label="ما هي الجائزة؟", placeholder="مثال: رتبة VIP", required=True)
-    duration = discord.ui.TextInput(label="مدة السحب (بالدقائق)", placeholder="مثال: 60 لساعة / 1440 ليوم", min_length=1, max_length=6, required=True)
-    description = discord.ui.TextInput(label="الوصف أو الشروط", style=discord.TextStyle.paragraph, placeholder="اكتب هنا الشروط...", required=False)
+# رتب الإدارة العامة (تشوف كل شيء)
+ADMIN_ROLES = [1490386915629989948, 1478971845729583276]
+# رتب الدعم الفني / الشكاوي / الرتب
+SUPPORT_ROLES = [1482194383515422752, 1480443913557905499]
+# رتب المتجر (نفس رتب الإدارة العامة حسب طلبك)
+STORE_ROLES = [1490386915629989948, 1478971845729583276]
+
+# --- نظام التذاكر المتطور ---
+
+class TicketCloseModal(discord.ui.Modal, title="إغلاق التذكرة"):
+    reason = discord.ui.TextInput(label="سبب الإغلاق", style=discord.TextStyle.paragraph, placeholder="اكتب السبب هنا...", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        # جمع المحادثة (Transcript)
+        log_content = ""
+        async for message in interaction.channel.history(limit=500, oldest_first=True):
+            time = message.created_at.strftime("%Y-%m-%d %H:%M")
+            log_content += f"[{time}] {message.author}: {message.content}\n"
+
+        # إرسال اللوق
+        log_ch = interaction.client.get_channel(LOG_TICKET_ID)
+        if log_ch:
+            file = discord.File(fp=io.StringIO(log_content), filename=f"ticket-{interaction.channel.name}.txt")
+            embed = discord.Embed(title="🔒 تذكرة مغلقة", color=discord.Color.red())
+            embed.add_field(name="فتح بواسطة:", value=interaction.channel.topic or "غير معروف")
+            embed.add_field(name="أغلق بواسطة:", value=interaction.user.mention)
+            embed.add_field(name="السبب:", value=self.reason.value, inline=False)
+            embed.timestamp = datetime.datetime.now()
+            await log_ch.send(embed=embed, file=file)
+
+        # مراسلة صاحب التذكرة
         try:
-            minutes = int(self.duration.value)
-            end_time = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
-            timestamp = int(end_time.timestamp())
+            owner_id = int(interaction.channel.name.split('-')[-1])
+            owner = interaction.guild.get_member(owner_id)
+            if owner:
+                await owner.send(f"⚠️ تم إغلاق تذكرتك في سيرفر BLS\n**بواسطة:** {interaction.user.mention}\n**السبب:** {self.reason.value}\n**التاريخ:** {datetime.datetime.now().strftime('%Y-%m-%d')}")
+        except: pass
 
-            embed = discord.Embed(title=f"🎉 قيف اوي: {self.prize.value} 🎉", color=0x5865F2)
-            embed.description = f"{self.description.value}\n\n**ينتهي السحب:** <t:{timestamp}:R>"
-            embed.set_footer(text="اضغط على الزر أدناه للمشاركة!")
+        await interaction.channel.delete()
 
-            await interaction.response.send_message("✅ جاري إرسال القيف اوي...", ephemeral=True)
-            msg = await interaction.channel.send(embed=embed, view=GiveawayView())
-
-            await asyncio.sleep(minutes * 60)
-            await end_giveaway_action(msg, self.prize.value)
-        except ValueError:
-            await interaction.response.send_message("❌ يرجى إدخال رقم صحيح للدقائق.", ephemeral=True)
-
-class GiveawayView(discord.ui.View):
+class TicketActionView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.participants = []
+        self.claimed_by = None
 
-    @discord.ui.button(label="(0) مشاركات", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="join_gv_unique")
-    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id in self.participants:
-            return await interaction.response.send_message("❌ أنت مشارك بالفعل!", ephemeral=True)
-        self.participants.append(interaction.user.id)
-        button.label = f"({len(self.participants)}) مشاركات"
+    @discord.ui.button(label="استلام التذكرة", style=discord.ButtonStyle.success, custom_id="claim_ticket")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.claimed_by:
+            return await interaction.response.send_message(f"❌ التذكرة مستلمة بالفعل من قبل <@{self.claimed_by}>", ephemeral=True)
+        
+        self.claimed_by = interaction.user.id
+        button.disabled = True
+        button.label = f"استلمها: {interaction.user.display_name}"
+        
+        # تحديث صلاحيات الروم (المستلم وصاحب التذكرة فقط)
+        overwrites = interaction.channel.overwrites
+        for role_id in (ADMIN_ROLES + SUPPORT_ROLES):
+            role = interaction.guild.get_role(role_id)
+            if role: overwrites[role] = discord.PermissionOverwrite(send_messages=False)
+        
+        overwrites[interaction.user] = discord.PermissionOverwrite(send_messages=True, read_messages=True)
+        await interaction.channel.edit(overwrites=overwrites)
+        
+        # إضافة نقاط تفاعل
+        user_id = str(interaction.user.id)
+        data[user_id] = data.get(user_id, {"points": 0})
+        data[user_id]["points"] = data.get(user_id, {}).get("points", 0) + 50
+        save_data()
+
         await interaction.response.edit_message(view=self)
+        await interaction.channel.send(f"✅ {interaction.user.mention} استلم التذكرة، سيتم الرد عليك قريباً.")
 
-async def end_giveaway_action(message, prize_name):
-    view = discord.ui.View.from_message(message)
-    participants = []
-    for item in view.children:
-        if item.custom_id == "join_gv_unique":
-            participants = getattr(view, 'participants', [])
-    if not participants:
-        await message.channel.send(f"😕 انتهى السحب على **{prize_name}** ولكن لم يشارك أحد.")
-    else:
-        winner_id = random.choice(participants)
-        await message.channel.send(f"🎊 مبروك <@{winner_id}>! لقد فزت بـ **{prize_name}** 🎉")
-    try: await message.delete()
-    except: pass
+    @discord.ui.button(label="إغلاق التذكرة", style=discord.ButtonStyle.danger, custom_id="close_ticket")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TicketCloseModal())
 
-class GiveawaySetupBtn(discord.ui.View):
-    def __init__(self): super().__init__(timeout=60)
-    @discord.ui.button(label="بدء إعداد الهدية", style=discord.ButtonStyle.secondary, emoji="⚙️")
-    async def start_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(GiveawayModal())
+class TicketDropdown(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="الدعم الفني", emoji="🛠️", value="support"),
+            discord.SelectOption(label="طلب رانك", emoji="🎖️", value="rank"),
+            discord.SelectOption(label="شكوى على شخص", emoji="👤", value="report_user"),
+            discord.SelectOption(label="شكوى على إداري", emoji="👔", value="report_staff"),
+            discord.SelectOption(label="تكت المتجر", emoji="🛒", value="store"),
+        ]
+        super().__init__(placeholder="اختر نوع التذكرة...", options=options, custom_id="ticket_select")
 
-# --- نظام الإجازات ---
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+        category_name = f"ticket-{self.values[0]}-{user.id}"
+        
+        # تحديد الرتب التي ترى التكت بناءً على النوع
+        view_roles = ADMIN_ROLES.copy()
+        if self.values[0] in ["support", "rank", "report_user", "report_staff"]:
+            view_roles += SUPPORT_ROLES
+        elif self.values[0] == "store":
+            view_roles += STORE_ROLES
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        for r_id in view_roles:
+            role = guild.get_role(r_id)
+            if role: overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        channel = await guild.create_text_channel(category_name, overwrites=overwrites, topic=user.mention)
+        
+        embed = discord.Embed(title="حياكم الله في خدمة تكت BLS", description="سيقوم الفريق المختص بالرد عليك قريباً.\nيرجى كتابة مشكلتك بوضوح.", color=0x2f3136)
+        embed.set_image(url=BANNER_URL)
+        await channel.send(content=f"{user.mention} | إدارة القسم", embed=embed, view=TicketActionView())
+        await interaction.response.send_message(f"✅ تم فتح تذكرتك هنا: {channel.mention}", ephemeral=True)
+
+# --- نظام الإجازات المحدث ---
+
 class VacationPanel(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label="أخذ إجازة", style=discord.ButtonStyle.success, emoji="📝", custom_id="take_vacation")
-    async def take_vacation(self, interaction: discord.Interaction, button: discord.ui.Button):
+    
+    @discord.ui.button(label="أخذ إجازة", style=discord.ButtonStyle.success, emoji="📝", custom_id="vac_take")
+    async def take(self, interaction: discord.Interaction, button: discord.ui.Button):
         if discord.utils.get(interaction.user.roles, id=WARNING_ROLE_ID):
-            return await interaction.response.send_message("❌ لا يمكنك طلب إجازة ولديك إنذار إداري.", ephemeral=True)
+            return await interaction.response.send_message("❌ لا يمكنك طلب إجازة ولديك إنذار نشط.", ephemeral=True)
         await interaction.response.send_modal(LeaveModal())
 
-    @discord.ui.button(label="سحب الإجازة", style=discord.ButtonStyle.danger, emoji="🔙", custom_id="cancel_vacation")
-    async def cancel_vacation(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="سحب الإجازة", style=discord.ButtonStyle.danger, emoji="🔙", custom_id="vac_cancel")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         if user_id not in data or not data[user_id].get("on_leave"):
-            return await interaction.response.send_message("❌ أنت لست في حالة إجازة حالياً.", ephemeral=True)
+            return await interaction.response.send_message("❌ أنت لست في إجازة.", ephemeral=True)
 
         now = datetime.datetime.now()
-        start_time = datetime.datetime.fromtimestamp(data[user_id]["leave_start"])
-        diff = (now - start_time).total_seconds()
+        start = datetime.datetime.fromtimestamp(data[user_id]["leave_start"])
+        diff = (now - start).total_seconds()
+        
         data[user_id]["cancel_count"] = data[user_id].get("cancel_count", 0) + 1
-        should_warn, reason = False, ""
+        warn = False
+        reason = ""
 
-        if diff > 86400:
-            should_warn, reason = True, "سحب إجازة بعد مرور 24 ساعة"
+        if diff > 86400: # 24 ساعة
+            warn, reason = True, "سحب إجازة بعد مرور 24 ساعة"
         elif data[user_id]["cancel_count"] >= 2:
-            should_warn, reason = True, "تكرار طلب وسحب الإجازة (للمرة الثانية)"
-            data[user_id]["cancel_count"] = 0
+            warn, reason = True, "تكرار طلب وسحب الإجازة"
 
-        if should_warn:
-            data[user_id]["warning_expiry"] = (now + datetime.timedelta(days=5)).timestamp()
-            await issue_warning(interaction.user, reason, 5)
+        if warn: await issue_escalated_warning(interaction.user, reason)
 
         await interaction.user.remove_roles(interaction.guild.get_role(VACATION_ROLE_ID))
         data[user_id]["on_leave"] = False
         save_data()
-        log_ch = bot.get_channel(LOG_ROOM_ID)
-        if log_ch: await log_ch.send(embed=discord.Embed(title="⚠️ سحب إجازة", description=f"الموظف: {interaction.user.mention}", color=0xffa500))
-        await interaction.response.send_message("⚠️ تم سحب الإجازة بنجاح.", ephemeral=True)
+        await interaction.response.send_message("⚠️ تم سحب الإجازة، وتحديث السجل الإداري.", ephemeral=True)
 
-class LeaveModal(discord.ui.Modal, title="طلب إجازة"):
-    days = discord.ui.TextInput(label="عدد الأيام", placeholder="3-14", min_length=1, max_length=2)
+class LeaveModal(discord.ui.Modal, title="طلب إجازة (الحد الأقصى 14 يوم)"):
+    days = discord.ui.TextInput(label="المدة بالأيام", min_length=1, max_length=2)
     async def on_submit(self, interaction: discord.Interaction):
         try: d = int(self.days.value)
-        except: return await interaction.response.send_message("❌ رقم غير صحيح.", ephemeral=True)
-        if d < 3: return await interaction.response.send_message("❌ الحد الأدنى 3 أيام.", ephemeral=True)
-
+        except: return await interaction.response.send_message("رقم غير صحيح", ephemeral=True)
+        
+        if d > 14: return await interaction.response.send_message("❌ الحد الأقصى للإجازة هو 14 يوم.", ephemeral=True)
+        
         user_id = str(interaction.user.id)
-        user_info = data.get(user_id, {"days_used": 0, "on_leave": False, "cancel_count": 0})
-        if user_info["days_used"] + d > 14:
-            return await interaction.response.send_message(f"❌ رصيدك لا يكفي.", ephemeral=True)
-
-        user_info["on_leave"], user_info["leave_start"] = True, datetime.datetime.now().timestamp()
-        user_info["days_used"] += d
-        data[user_id] = user_info
+        data[user_id] = data.get(user_id, {"days_used": 0})
+        data[user_id].update({"on_leave": True, "leave_start": datetime.datetime.now().timestamp()})
         save_data()
+        
         await interaction.user.add_roles(interaction.guild.get_role(VACATION_ROLE_ID))
-        log_ch = bot.get_channel(LOG_ROOM_ID)
-        if log_ch: await log_ch.send(embed=discord.Embed(title="✅ طلب إجازة جديد", description=f"الموظف: {interaction.user.mention}\nالمدة: {d} يوم", color=0x00ff00))
-        await interaction.response.send_message(f"✅ تم قبول إجازتك لمدة {d} أيام.", ephemeral=True)
+        await interaction.response.send_message(f"✅ تم تسجيل إجازتك لمدة {d} أيام.", ephemeral=True)
 
-# --- إعداد البوت الأساسي ---
+# --- دوال مساعدة ---
+
+def save_data():
+    with open('data.json', 'w') as f: json.dump(data, f)
+
+async def issue_escalated_warning(member, reason):
+    user_id = str(member.id)
+    data[user_id] = data.get(user_id, {"warns": 0})
+    data[user_id]["warns"] += 1
+    count = data[user_id]["warns"]
+    
+    # الإنذار تصاعدي
+    expiry = datetime.datetime.now() + datetime.timedelta(days=5 * count)
+    data[user_id]["warning_expiry"] = expiry.timestamp()
+    save_data()
+
+    role = member.guild.get_role(WARNING_ROLE_ID)
+    await member.add_roles(role)
+    
+    ch = member.guild.get_channel(WARNING_ROOM_ID)
+    embed = discord.Embed(title="⚠️ إنذار إداري تصاعدي", color=0xff0000)
+    embed.description = f"**الموظف:** {member.mention}\n**السبب:** {reason}\n**المستوى:** {count}\n**المدة:** {5*count} أيام"
+    await ch.send(embed=embed)
+
+# --- البوت الرئيسي ---
+
 class MyBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all() # تفعيل جميع الصلاحيات لضمان عمل الأنظمة
-        super().__init__(command_prefix='!', intents=intents)
+        super().__init__(command_prefix='!', intents=discord.Intents.all())
     
     async def setup_hook(self):
+        self.add_view(TicketActionView())
         self.add_view(VacationPanel())
-        self.add_view(GiveawayView())
+        self.add_view(discord.ui.View().add_item(TicketDropdown()))
 
 bot = MyBot()
 data = {}
 
-# --- إدارة البيانات ---
-def save_data():
-    with open('data.json', 'w') as f: json.dump(data, f)
-
-def load_data():
-    global data
-    if not os.path.exists('data.json'):
-        with open('data.json', 'w') as f: json.dump({}, f)
-    try:
-        with open('data.json', 'r') as f: data = json.load(f)
-    except: data = {}
-
-async def issue_warning(member, reason, days):
-    warn_ch, role = bot.get_channel(WARNING_ROOM_ID), member.guild.get_role(WARNING_ROLE_ID)
-    if not role or not warn_ch: return
-    await member.add_roles(role)
-    embed = discord.Embed(title="⚠️ إنذار إداري تلقائي", color=0xff0000)
-    embed.add_field(name="الموظف:", value=member.mention, inline=False)
-    embed.add_field(name="السبب:", value=reason, inline=False)
-    embed.set_footer(text=f"مدة الإنذار: {days} أيام")
-    await warn_ch.send(embed=embed)
-
-@tasks.loop(minutes=30)
-async def check_expirations():
-    now = datetime.datetime.now().timestamp()
-    for user_id, info in list(data.items()):
-        if info.get("warning_expiry") and now > info["warning_expiry"]:
-            for guild in bot.guilds:
-                member = guild.get_member(int(user_id))
-                if member:
-                    role = guild.get_role(WARNING_ROLE_ID)
-                    if role in member.roles: await member.remove_roles(role)
-            info["warning_expiry"] = None
-            save_data()
-
 @bot.event
 async def on_ready():
-    load_data()
-    if not check_expirations.is_running(): check_expirations.start()
-    print(f'Logged in as {bot.user.name}')
+    global data
+    if os.path.exists('data.json'):
+        with open('data.json', 'r') as f: data = json.load(f)
+    print(f"Logged in as {bot.user}")
 
-# --- الأوامر الإدارية ---
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setup_ticket(ctx):
+    if ctx.channel.id != TICKET_SETUP_CHANNEL: return
+    await ctx.message.delete()
+    embed = discord.Embed(title="مركز تذاكر BLS", description="اختر القسم المناسب من القائمة أدناه لفتح تذكرة.", color=0x2f3136)
+    embed.set_image(url=BANNER_URL)
+    view = discord.ui.View(timeout=None)
+    view.add_item(TicketDropdown())
+    await ctx.send(embed=embed, view=view)
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setup_vacation(ctx):
     await ctx.message.delete()
     embed = discord.Embed(title="📦 نظام إجازات الموظفين", color=0x0000ff)
-    embed.description = "استخدم الأزرار أدناه للتحكم في إجازتك."
+    embed.description = "ملاحظة: سحب الإجازة بعد 24 ساعة أو التكرار يعرضك لإنذار إداري تصاعدي.\nالحد الأقصى للإجازة 14 يوم."
     await ctx.send(embed=embed, view=VacationPanel())
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def giveaway(ctx):
-    if ctx.channel.id != GIVEAWAY_CHANNEL_ID: return
-    await ctx.message.delete()
-    await ctx.send("⚙️ لوحة إعداد الهدية:", view=GiveawaySetupBtn(), delete_after=30)
-
-@bot.command()
-@commands.has_permissions(administrator=True)
 async def unwarn(ctx, member: discord.Member):
-    await ctx.message.delete()
+    if ctx.channel.id != WARNING_ROOM_ID: return
+    user_id = str(member.id)
+    if user_id in data:
+        data[user_id]["warning_expiry"] = None
+        save_data()
     role = ctx.guild.get_role(WARNING_ROLE_ID)
-    if role and role in member.roles: 
-        await member.remove_roles(role)
-    if str(member.id) in data:
-        data[str(member.id)]["warning_expiry"] = None
-        save_data()
-    await ctx.send(f"✅ تم سحب الإنذار عن {member.mention}.", delete_after=5)
+    await member.remove_roles(role)
+    await ctx.send(f"✅ تم سحب الإنذار عن {member.mention}")
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def reset_days(ctx, member: discord.Member):
-    await ctx.message.delete()
-    if str(member.id) in data:
-        data[str(member.id)]["days_used"] = 0
-        data[str(member.id)]["cancel_count"] = 0
-        save_data()
-        await ctx.send(f"✅ تم تصفير بيانات {member.mention}.", delete_after=5)
-
-# تشغيل البوت
-if TOKEN:
-    bot.run(TOKEN)
-else:
-    print("Error: No Token found! Check your Render Environment Variables.")
+import io
+bot.run(TOKEN)
