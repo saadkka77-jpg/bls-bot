@@ -1,22 +1,14 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import asyncio
 import datetime
 import io
 import os
 
-# =========================
-# TOKEN CHECK
-# =========================
-
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
     raise Exception("TOKEN not found! Add TOKEN in environment variables.")
-
-# =========================
-# INTENTS (مهم)
-# =========================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -29,9 +21,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # IDS
 # =========================
 
-TICKET_PANEL_CHANNEL = 1481127399042322582
 LOG_CHANNEL_ID = 1480456866613170267
-
 WARNING_ROLE_ID = 1493332501811171470
 
 # =========================
@@ -48,6 +38,8 @@ SUPPORT_ROLES = [
 ]
 
 ACTIVITY_ROLES = SUPPORT_ROLES
+
+# الرتب المسموح إعطاؤها (من كودك القديم)
 
 ROLE_LIST = [
 1490075194528759838,
@@ -76,7 +68,7 @@ def has_role(member, roles):
     return any(r.id in roles for r in member.roles)
 
 # =========================
-# CLOSE MODAL
+# TICKET SYSTEM
 # =========================
 
 class CloseModal(discord.ui.Modal, title="اغلاق التكت"):
@@ -112,45 +104,70 @@ class CloseModal(discord.ui.Modal, title="اغلاق التكت"):
         )
 
         await asyncio.sleep(2)
-
         await channel.delete()
 
-# =========================
-# WARNING SYSTEM
-# =========================
 
-async def add_warning(member, days, reason, staff):
+class TicketButtons(discord.ui.View):
 
-    end = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+    def __init__(self):
+        super().__init__(timeout=None)
 
-    warnings_data.setdefault(member.id, []).append({
-        "reason": reason,
-        "end": end
-    })
+    @discord.ui.button(label="استلام", style=discord.ButtonStyle.green)
+    async def claim(self, interaction, button):
 
-    role = member.guild.get_role(WARNING_ROLE_ID)
+        if not has_role(interaction.user, SUPPORT_ROLES):
+            return await interaction.response.send_message(
+                "لا تملك صلاحية",
+                ephemeral=True
+            )
 
-    if role:
-        await member.add_roles(role)
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
 
-@tasks.loop(minutes=1)
-async def check_warnings():
+    @discord.ui.button(label="اغلاق", style=discord.ButtonStyle.red)
+    async def close(self, interaction, button):
+        await interaction.response.send_modal(CloseModal())
 
-    now = datetime.datetime.utcnow()
 
-    for uid in list(warnings_data.keys()):
+class TicketPanel(discord.ui.View):
 
-        active = []
+    def __init__(self):
+        super().__init__(timeout=None)
 
-        for w in warnings_data[uid]:
+    @discord.ui.button(label="فتح تكت", style=discord.ButtonStyle.green)
+    async def open_ticket(self, interaction, button):
 
-            if w["end"] > now:
-                active.append(w)
+        guild = interaction.guild
 
-        if not active:
-            warnings_data.pop(uid, None)
-        else:
-            warnings_data[uid] = active
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True
+            )
+        }
+
+        for role_id in SUPPORT_ROLES:
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True
+                )
+
+        channel = await guild.create_text_channel(
+            name=f"ticket-{interaction.user.name}",
+            overwrites=overwrites
+        )
+
+        await channel.send(
+            f"{interaction.user.mention}",
+            view=TicketButtons()
+        )
+
+        await interaction.response.send_message(
+            f"تم فتح التكت: {channel.mention}",
+            ephemeral=True
+        )
 
 # =========================
 # VACATION SYSTEM
@@ -213,63 +230,126 @@ class VacationView(discord.ui.View):
             ephemeral=True
         )
 
-@tasks.loop(minutes=1)
-async def check_vacations():
-
-    now = datetime.datetime.utcnow()
-
-    for uid in list(active_vacations.keys()):
-
-        if active_vacations[uid]["end"] <= now:
-            active_vacations.pop(uid, None)
-
 # =========================
-# ACTIVITY SYSTEM
+# ROLE SYSTEM
 # =========================
 
-@bot.event
-async def on_message(message):
+class RoleSelect(discord.ui.Select):
 
-    if message.author.bot:
-        return
+    def __init__(self, member, action):
 
-    if has_role(message.author, ACTIVITY_ROLES):
+        self.member = member
+        self.action = action
 
-        points_data[message.author.id] = (
-            points_data.get(message.author.id, 0)
-            + 15
+        options = []
+
+        for role_id in ROLE_LIST:
+            role = member.guild.get_role(role_id)
+            if role:
+                options.append(
+                    discord.SelectOption(
+                        label=role.name,
+                        value=str(role.id)
+                    )
+                )
+
+        super().__init__(
+            placeholder="اختر رتبة",
+            options=options
         )
 
-    await bot.process_commands(message)
+    async def callback(self, interaction):
 
-@bot.event
-async def on_voice_state_update(member, before, after):
+        role = interaction.guild.get_role(
+            int(self.values[0])
+        )
 
-    if not has_role(member, ACTIVITY_ROLES):
-        return
+        if self.action == "give":
 
-    now = datetime.datetime.utcnow()
+            await self.member.add_roles(role)
+            msg = f"تم اعطاء {role.mention}"
 
-    if before.channel is None and after.channel:
+        else:
 
-        voice_times[member.id] = now
+            await self.member.remove_roles(role)
+            msg = f"تم سحب {role.mention}"
 
-    elif before.channel and not after.channel:
+        await interaction.response.send_message(
+            msg,
+            ephemeral=True
+        )
 
-        start = voice_times.pop(member.id, None)
 
-        if start:
+class ActionSelect(discord.ui.Select):
 
-            mins = (now - start).seconds // 60
+    def __init__(self, member):
 
-            points_data[member.id] = (
-                points_data.get(member.id, 0)
-                + mins * 25
+        self.member = member
+
+        super().__init__(
+            placeholder="اختر العملية",
+            options=[
+                discord.SelectOption(
+                    label="اعطاء",
+                    value="give"
+                ),
+                discord.SelectOption(
+                    label="سحب",
+                    value="remove"
+                )
+            ]
+        )
+
+    async def callback(self, interaction):
+
+        view = discord.ui.View()
+
+        view.add_item(
+            RoleSelect(
+                self.member,
+                self.values[0]
             )
+        )
+
+        await interaction.response.edit_message(
+            content="اختر الرتبة",
+            view=view
+        )
 
 # =========================
 # COMMANDS
 # =========================
+
+@bot.command()
+async def ticketpanel(ctx):
+    await ctx.send(
+        "اضغط لفتح تكت",
+        view=TicketPanel()
+    )
+
+
+@bot.command()
+async def vacationpanel(ctx):
+    await ctx.send(
+        "نظام الإجازات",
+        view=VacationView()
+    )
+
+
+@bot.command()
+async def role(ctx, member: discord.Member):
+
+    view = discord.ui.View()
+
+    view.add_item(
+        ActionSelect(member)
+    )
+
+    await ctx.send(
+        "اختر العملية",
+        view=view
+    )
+
 
 @bot.command()
 async def points(ctx, member: discord.Member = None):
@@ -286,17 +366,6 @@ async def points(ctx, member: discord.Member = None):
 
 @bot.event
 async def on_ready():
-
-    if not check_warnings.is_running():
-        check_warnings.start()
-
-    if not check_vacations.is_running():
-        check_vacations.start()
-
     print(f"Bot Ready {bot.user}")
-
-# =========================
-# RUN
-# =========================
 
 bot.run(TOKEN)
