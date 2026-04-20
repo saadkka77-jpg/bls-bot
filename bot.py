@@ -1,344 +1,115 @@
 import discord
 from discord.ext import commands
+import yt_dlp
 import asyncio
-import datetime
 import os
 
 TOKEN = os.getenv("TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
+intents.voice_states = True # مهم جداً للصوت
 
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# =========================
-# SETTINGS
-# =========================
+# إعدادات مستخرج الصوت (yt-dlp)
+YDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'noplaylist': True,
+    'quiet': True,
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+}
 
-PANEL_CHANNEL_ID = 1481127399042322582
-LOG_CHANNEL_ID = 1480456866613170267
-
-ticket_counter = 0
-claimed_tickets = {}
-
-# =========================
-# ROLES
-# =========================
-
-SUPPORT_ROLES = [
-1477492633847857252,
-1482194383515422752,
-1480443913557905499,
-1490386915629989948,
-1478971845729583276,
-1478970736717598840
-]
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
 
 # =========================
-# LOG FUNCTION
+# قائمة اختيار الروم الصوتي
 # =========================
 
-async def send_log(message):
+class VoiceChannelSelect(discord.ui.Select):
+    def __init__(self, url):
+        self.url = url
+        # جلب القنوات الصوتية في السيرفر فقط
+        super().__init__(placeholder="اختر الروم الصوتي الذي تريد تشغيل الأغنية فيه...")
 
-    log_channel = bot.get_channel(
-        LOG_CHANNEL_ID
-    )
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer() # تأخير الرد لتجنب انتهاء الوقت
+        
+        channel = interaction.guild.get_channel(int(self.values[0]))
+        
+        # الاتصال بالروم
+        if interaction.guild.voice_client:
+            await interaction.guild.voice_client.move_to(channel)
+        else:
+            await channel.connect()
 
-    if log_channel:
-        await log_channel.send(message)
+        vc = interaction.guild.voice_client
 
-# =========================
-# CLOSE MODAL
-# =========================
+        # استخراج رابط الصوت وتشغيله
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            try:
+                info = ydl.extract_info(self.url, download=False)
+                url2 = info['url']
+                title = info.get('title', 'أغنية')
+                
+                if vc.is_playing():
+                    vc.stop()
+                
+                vc.play(discord.FFmpegPCMAudio(url2, **FFMPEG_OPTIONS))
+                await interaction.followup.send(f"🎶 جاري تشغيل: **{title}** في {channel.mention}")
+            except Exception as e:
+                await interaction.followup.send(f"❌ حدث خطأ أثناء التشغيل: {e}")
 
-class CloseModal(discord.ui.Modal, title="اغلاق التكت"):
-
-    reason = discord.ui.TextInput(
-        label="سبب اغلاق التكت",
-        style=discord.TextStyle.paragraph
-    )
-
-    async def on_submit(self, interaction):
-
-        channel = interaction.channel
-
-        now = datetime.datetime.now().strftime(
-            "%Y-%m-%d | %H:%M"
-        )
-
-        await send_log(
-            f"🔴 تم اغلاق التكت {channel.name}\n"
-            f"بواسطة {interaction.user.mention}\n"
-            f"الوقت: {now}\n"
-            f"السبب: {self.reason}"
-        )
-
-        await asyncio.sleep(3)
-
-        await channel.delete()
-
-# =========================
-# BUTTONS
-# =========================
-
-class TicketButtons(discord.ui.View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    # =====================
-    # CLAIM
-    # =====================
-
-    @discord.ui.button(
-        label="استلام التكت",
-        style=discord.ButtonStyle.green
-    )
-    async def claim(
-        self,
-        interaction,
-        button
-    ):
-
-        if interaction.channel.id in claimed_tickets:
-
-            return await interaction.response.send_message(
-                "تم استلام التكت مسبقاً",
-                ephemeral=True
-            )
-
-        if not any(
-            r.id in SUPPORT_ROLES
-            for r in interaction.user.roles
-        ):
-
-            return await interaction.response.send_message(
-                "لا تملك صلاحية",
-                ephemeral=True
-            )
-
-        channel = interaction.channel
-
-        claimed_tickets[
-            channel.id
-        ] = interaction.user.id
-
-        # منع باقي الدعم من الكتابة
-
-        for role_id in SUPPORT_ROLES:
-
-            role = interaction.guild.get_role(
-                role_id
-            )
-
-            if role:
-
-                await channel.set_permissions(
-                    role,
-                    send_messages=False
-                )
-
-        # السماح للمستلم فقط
-
-        await channel.set_permissions(
-            interaction.user,
-            send_messages=True
-        )
-
-        await send_log(
-            f"🟢 تم استلام {channel.name}\n"
-            f"بواسطة {interaction.user.mention}"
-        )
-
-        await interaction.response.send_message(
-            "تم استلام التكت",
-            ephemeral=True
-        )
-
-    # =====================
-    # CLOSE REQUEST
-    # =====================
-
-    @discord.ui.button(
-        label="طلب اغلاق",
-        style=discord.ButtonStyle.red
-    )
-    async def close_request(
-        self,
-        interaction,
-        button
-    ):
-
-        channel = interaction.channel
-
-        await send_log(
-            f"🟡 طلب اغلاق {channel.name}\n"
-            f"بواسطة {interaction.user.mention}"
-        )
-
-        await interaction.response.send_message(
-            "تم ارسال طلب الاغلاق للإدارة",
-            ephemeral=True
-        )
+class MusicView(discord.ui.View):
+    def __init__(self, url, channels):
+        super().__init__(timeout=60)
+        select = VoiceChannelSelect(url)
+        # إضافة أول 25 روم صوتي للقائمة (حد ديسكورد الأقصى)
+        for ch in channels[:25]:
+            select.add_option(label=ch.name, value=str(ch.id), emoji="🔊")
+        self.add_item(select)
 
 # =========================
-# SELECT MENU
-# =========================
-
-class TicketSelect(discord.ui.Select):
-
-    def __init__(self):
-
-        options = [
-
-            discord.SelectOption(
-                label="الدعم الفني",
-                value="support"
-            ),
-
-            discord.SelectOption(
-                label="المتجر",
-                value="store"
-            ),
-
-            discord.SelectOption(
-                label="شكوة على اداري",
-                value="admin"
-            ),
-
-            discord.SelectOption(
-                label="تكت رانك",
-                value="rank"
-            ),
-
-            discord.SelectOption(
-                label="شكوة على شخص",
-                value="person"
-            )
-
-        ]
-
-        super().__init__(
-            placeholder="اختر القسم",
-            options=options
-        )
-
-    async def callback(self, interaction):
-
-        global ticket_counter
-
-        guild = interaction.guild
-        user = interaction.user
-
-        ticket_counter += 1
-
-        ticket_name = f"ticket-{ticket_counter}"
-
-        overwrites = {
-
-            guild.default_role:
-            discord.PermissionOverwrite(
-                view_channel=False
-            ),
-
-            user:
-            discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True
-            )
-
-        }
-
-        # منع الدعم من الكتابة قبل الاستلام
-
-        for role_id in SUPPORT_ROLES:
-
-            role = guild.get_role(role_id)
-
-            if role:
-
-                overwrites[role] = (
-                    discord.PermissionOverwrite(
-                        view_channel=True,
-                        send_messages=False
-                    )
-                )
-
-        channel = await guild.create_text_channel(
-            name=ticket_name,
-            overwrites=overwrites
-        )
-
-        embed = discord.Embed(
-            title=f"تذكرة رقم #{ticket_counter}",
-            description="اكتب مشكلتك وسيتم الرد عليك",
-            color=discord.Color.blue()
-        )
-
-        await channel.send(
-            content=user.mention,
-            embed=embed,
-            view=TicketButtons()
-        )
-
-        await send_log(
-            f"📩 تم فتح {channel.name}\n"
-            f"بواسطة {user.mention}"
-        )
-
-        await interaction.response.send_message(
-            f"تم فتح التكت {channel.mention}",
-            ephemeral=True
-        )
-
-# =========================
-# PANEL
-# =========================
-
-class TicketPanel(discord.ui.View):
-
-    def __init__(self):
-
-        super().__init__(timeout=None)
-
-        self.add_item(
-            TicketSelect()
-        )
-
-# =========================
-# COMMAND
+# أمر التشغيل (الرابط)
 # =========================
 
 @bot.command()
-async def ticketpanel(ctx):
+async def play(ctx, *, url: str):
+    # التحقق من وجود رومات صوتية
+    voice_channels = ctx.guild.voice_channels
+    if not voice_channels:
+        return await ctx.send("لا توجد رومات صوتية في هذا السيرفر!")
 
-    if ctx.channel.id != PANEL_CHANNEL_ID:
-        return
-
-    await ctx.message.delete()
-
+    # إرسال القائمة للمستخدم
     embed = discord.Embed(
-        title="نظام التكت BLS",
-        description="حياك الله في خدمة التكت الخاصة بي BLS\nاختر القسم",
-        color=discord.Color.green()
+        title="🎵 نظام الموسيقى",
+        description="الرجاء اختيار الروم الصوتي من القائمة أدناه لبدء التشغيل",
+        color=discord.Color.blue()
     )
-
-    await ctx.send(
-        embed=embed,
-        view=TicketPanel()
-    )
+    await ctx.send(embed=embed, view=MusicView(url, voice_channels))
 
 # =========================
+# أمر الإيقاف والخروج
+# =========================
+
+@bot.command()
+async def stop(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
+    else:
+        await ctx.send("أنا لست متصلاً بروم صوتي أصلاً!")
 
 @bot.event
 async def on_ready():
-
-    print(
-        f"Bot Ready {bot.user}"
-    )
+    print(f"✅ تم تشغيل بوت الأغاني: {bot.user}")
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="!play [link]"))
 
 bot.run(TOKEN)
