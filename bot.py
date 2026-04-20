@@ -20,6 +20,7 @@ bot = commands.Bot(
 # =========================
 
 PANEL_CHANNEL_ID = 1481127399042322582
+LOG_CHANNEL_ID = 1480456866613170267
 
 ticket_counter = 0
 claimed_tickets = {}
@@ -37,11 +38,18 @@ SUPPORT_ROLES = [
 1478970736717598840
 ]
 
-ADMIN_ROLES = [
-1490386915629989948,
-1478971845729583276,
-1478970736717598840
-]
+# =========================
+# LOG FUNCTION
+# =========================
+
+async def send_log(message):
+
+    log_channel = bot.get_channel(
+        LOG_CHANNEL_ID
+    )
+
+    if log_channel:
+        await log_channel.send(message)
 
 # =========================
 # CLOSE MODAL
@@ -57,28 +65,16 @@ class CloseModal(discord.ui.Modal, title="اغلاق التكت"):
     async def on_submit(self, interaction):
 
         channel = interaction.channel
-        closer = interaction.user
 
         now = datetime.datetime.now().strftime(
             "%Y-%m-%d | %H:%M"
         )
 
-        embed = discord.Embed(
-            title="تم اغلاق التكت",
-            description=f"""
-بواسطة: {closer.mention}
-
-الوقت:
-{now}
-
-السبب:
-{self.reason}
-""",
-            color=discord.Color.red()
-        )
-
-        await interaction.response.send_message(
-            embed=embed
+        await send_log(
+            f"🔴 تم اغلاق التكت {channel.name}\n"
+            f"بواسطة {interaction.user.mention}\n"
+            f"الوقت: {now}\n"
+            f"السبب: {self.reason}"
         )
 
         await asyncio.sleep(3)
@@ -86,13 +82,17 @@ class CloseModal(discord.ui.Modal, title="اغلاق التكت"):
         await channel.delete()
 
 # =========================
-# TICKET BUTTONS
+# BUTTONS
 # =========================
 
 class TicketButtons(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
+
+    # =====================
+    # CLAIM
+    # =====================
 
     @discord.ui.button(
         label="استلام التكت",
@@ -105,6 +105,7 @@ class TicketButtons(discord.ui.View):
     ):
 
         if interaction.channel.id in claimed_tickets:
+
             return await interaction.response.send_message(
                 "تم استلام التكت مسبقاً",
                 ephemeral=True
@@ -114,33 +115,74 @@ class TicketButtons(discord.ui.View):
             r.id in SUPPORT_ROLES
             for r in interaction.user.roles
         ):
+
             return await interaction.response.send_message(
                 "لا تملك صلاحية",
                 ephemeral=True
             )
 
+        channel = interaction.channel
+
         claimed_tickets[
-            interaction.channel.id
+            channel.id
         ] = interaction.user.id
 
-        await interaction.channel.send(
-            f"تم استلام التكت بواسطة {interaction.user.mention}"
+        # منع باقي الدعم من الكتابة
+
+        for role_id in SUPPORT_ROLES:
+
+            role = interaction.guild.get_role(
+                role_id
+            )
+
+            if role:
+
+                await channel.set_permissions(
+                    role,
+                    send_messages=False
+                )
+
+        # السماح للمستلم فقط
+
+        await channel.set_permissions(
+            interaction.user,
+            send_messages=True
         )
 
-        await interaction.response.defer()
+        await send_log(
+            f"🟢 تم استلام {channel.name}\n"
+            f"بواسطة {interaction.user.mention}"
+        )
+
+        await interaction.response.send_message(
+            "تم استلام التكت",
+            ephemeral=True
+        )
+
+    # =====================
+    # CLOSE REQUEST
+    # =====================
 
     @discord.ui.button(
-        label="اغلاق التكت",
+        label="طلب اغلاق",
         style=discord.ButtonStyle.red
     )
-    async def close(
+    async def close_request(
         self,
         interaction,
         button
     ):
 
-        await interaction.response.send_modal(
-            CloseModal()
+        channel = interaction.channel
+
+        await send_log(
+            f"🟡 طلب اغلاق {channel.name}\n"
+            f"بواسطة {interaction.user.mention}"
+        )
+
+        await interaction.response.send_message(
+            "تم ارسال طلب الاغلاق للإدارة",
+            ephemeral=True
         )
 
 # =========================
@@ -211,55 +253,9 @@ class TicketSelect(discord.ui.Select):
 
         }
 
-        message = ""
+        # منع الدعم من الكتابة قبل الاستلام
 
-        roles = SUPPORT_ROLES
-
-        if self.values[0] == "support":
-
-            message = (
-                "حياك الله في الدعم الفني الخاص بي BLS\n"
-                "اكتب شرح مشكلتك"
-            )
-
-        elif self.values[0] == "store":
-
-            message = (
-                "حياك الله في المتجر\n"
-                "اكتب اسم المنتج\n"
-                "في حال عدم الرد خلال 24 ساعة يتم الغاء الطلب"
-            )
-
-            roles = ADMIN_ROLES
-
-        elif self.values[0] == "admin":
-
-            message = (
-                "حياك اكتب ملخص الشكوة و ارفق الدليل\n"
-                "اسباب الرفض:\n"
-                "مرور 24 ساعة\n"
-                "عدم وجود دليل"
-            )
-
-            roles = ADMIN_ROLES
-
-        elif self.values[0] == "rank":
-
-            message = (
-                "حياك الله في خدمة الرانك\n"
-                "اطلب رانك و ارسل الدليل"
-            )
-
-        elif self.values[0] == "person":
-
-            message = (
-                "اكتب ملخص الشكوة\n"
-                "اسباب رفض الشكوة:\n"
-                "مرور 24 ساعة\n"
-                "عدم وجود دليل"
-            )
-
-        for role_id in roles:
+        for role_id in SUPPORT_ROLES:
 
             role = guild.get_role(role_id)
 
@@ -267,7 +263,8 @@ class TicketSelect(discord.ui.Select):
 
                 overwrites[role] = (
                     discord.PermissionOverwrite(
-                        view_channel=True
+                        view_channel=True,
+                        send_messages=False
                     )
                 )
 
@@ -278,7 +275,7 @@ class TicketSelect(discord.ui.Select):
 
         embed = discord.Embed(
             title=f"تذكرة رقم #{ticket_counter}",
-            description=message,
+            description="اكتب مشكلتك وسيتم الرد عليك",
             color=discord.Color.blue()
         )
 
@@ -286,6 +283,11 @@ class TicketSelect(discord.ui.Select):
             content=user.mention,
             embed=embed,
             view=TicketButtons()
+        )
+
+        await send_log(
+            f"📩 تم فتح {channel.name}\n"
+            f"بواسطة {user.mention}"
         )
 
         await interaction.response.send_message(
@@ -321,7 +323,7 @@ async def ticketpanel(ctx):
 
     embed = discord.Embed(
         title="نظام التكت BLS",
-        description="حياك الله في خدمة التكت الخاصة بي BLS\nاختر القسم من القائمة",
+        description="حياك الله في خدمة التكت الخاصة بي BLS\nاختر القسم",
         color=discord.Color.green()
     )
 
