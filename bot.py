@@ -1,4 +1,4 @@
-\import discord
+import discord
 from discord.ext import commands
 from discord.ui import View, Select
 import os
@@ -44,7 +44,7 @@ SHOP_CATEGORY = 1487848330804330699
 SUPPORT_CATEGORY = 1487721982945394728
 ADMIN_CATEGORY = 1487709726765748295
 
-LOG_CHANNEL = 000000000000000000
+LOG_CHANNEL = 1480456866613170267
 
 
 # ===============================
@@ -69,6 +69,7 @@ ADMIN_COMPLAINT_ROLES = [
 ]
 
 ALL_ROLES = list(set(SUPPORT_ROLES + ADMIN_COMPLAINT_ROLES))
+
 
 # ===============================
 # مودال الإغلاق
@@ -115,6 +116,8 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
                 )
             )
 
+        # إرسال DM احترافي
+
         try:
 
             opener_id = int(channel.topic)
@@ -126,8 +129,11 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
                     f"👮‍♂️ المسؤول: {interaction.user.mention}\n"
                     f"📝 السبب:\n{reason_text}"
                 ),
-                color=discord.Color.red()
+                color=discord.Color.red(),
+                timestamp=datetime.datetime.utcnow()
             )
+
+            dm.set_footer(text="BLS Ticket System")
 
             await user.send(embed=dm)
 
@@ -168,22 +174,7 @@ class TicketButtons(View):
 
         opener_id = int(channel.topic)
 
-        opener = guild.get_member(opener_id)
-
-        if opener:
-
-            await channel.set_permissions(
-                opener,
-                send_messages=True
-            )
-
-        await channel.set_permissions(
-            claimer,
-            send_messages=True
-        )
-
         # قفل الكتابة عن باقي الرتب
-
         for role_id in ALL_ROLES:
 
             role = guild.get_role(role_id)
@@ -194,6 +185,12 @@ class TicketButtons(View):
                     role,
                     send_messages=False
                 )
+
+        # السماح للمستلم
+        await channel.set_permissions(
+            claimer,
+            send_messages=True
+        )
 
         embed = discord.Embed(
             description=f"📌 تم استلام التكت بواسطة {claimer.mention}",
@@ -237,30 +234,23 @@ async def create_ticket(interaction, ticket_type):
 
     ticket_number = get_ticket_number()
 
-    # تحديد القسم
-
     if ticket_type == "rank":
-
         category_id = RANK_CATEGORY
         ticket_name = f"ticket-{ticket_number}-rank"
 
     elif ticket_type == "support":
-
         category_id = SUPPORT_CATEGORY
         ticket_name = f"ticket-{ticket_number}-support"
 
     elif ticket_type == "person":
-
         category_id = PERSON_CATEGORY
         ticket_name = f"ticket-{ticket_number}-person"
 
     elif ticket_type == "admin":
-
         category_id = ADMIN_CATEGORY
         ticket_name = f"ticket-{ticket_number}-admin"
 
     elif ticket_type == "shop":
-
         category_id = SHOP_CATEGORY
         ticket_name = f"ticket-{ticket_number}-shop"
 
@@ -278,7 +268,7 @@ async def create_ticket(interaction, ticket_type):
             )
     }
 
-    # إدخال الرتب داخل التكت من البداية
+    # إدخال الرتب داخل التكت مباشرة
 
     for role_id in ALL_ROLES:
 
@@ -305,11 +295,12 @@ async def create_ticket(interaction, ticket_type):
     embed = discord.Embed(
         title="🎫 نظام التكت - BLS",
         description=(
-            "تم فتح التكت بنجاح ✅\n\n"
+            "✅ **تم فتح التكت بنجاح**\n\n"
             "📌 يرجى شرح طلبك بالتفصيل\n"
             "📎 إرفاق الأدلة إن وجدت"
         ),
-        color=discord.Color.blue()
+        color=discord.Color.blue(),
+        timestamp=datetime.datetime.utcnow()
     )
 
     embed.set_footer(
@@ -372,7 +363,7 @@ class TicketSelect(Select):
         ]
 
         super().__init__(
-            placeholder="حياك الله في خدمة التكت الخاصة بـ BLS",
+            placeholder="اختر نوع التكت",
             options=options
         )
 
