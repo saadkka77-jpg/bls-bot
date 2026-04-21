@@ -34,7 +34,6 @@ def get_ticket_number():
 
     return data["ticket"]
 
-
 # ===============================
 # إعدادات الرومات
 # ===============================
@@ -46,7 +45,6 @@ SUPPORT_CATEGORY = 1487721982945394728
 ADMIN_CATEGORY = 1487709726765748295
 
 LOG_CHANNEL = 1480456866613170267
-
 
 # ===============================
 # الرتب
@@ -70,7 +68,6 @@ ADMIN_COMPLAINT_ROLES = [
 ]
 
 ALL_ROLES = list(set(SUPPORT_ROLES + ADMIN_COMPLAINT_ROLES))
-
 
 # ===============================
 # مودال الإغلاق
@@ -121,7 +118,7 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
 
         try:
 
-            opener_id = int(channel.topic)
+            opener_id = int(channel.topic.split("|")[0])
             user = await bot.fetch_user(opener_id)
 
             dm = discord.Embed(
@@ -142,7 +139,6 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
             pass
 
         await channel.delete()
-
 
 # ===============================
 # أزرار التكت
@@ -173,9 +169,27 @@ class TicketButtons(View):
                 ephemeral=True
             )
 
-        opener_id = int(channel.topic)
+        topic = channel.topic
 
-        # خلي كل الإداريين قراءة فقط
+        # إذا التكت مستلم
+        if "|claimed:" in topic:
+
+            claimed_id = int(topic.split("|claimed:")[1])
+
+            if claimed_id != 0 and claimed_id != claimer.id:
+
+                return await interaction.followup.send(
+                    "❌ هذا التكت تم استلامه بالفعل من إداري آخر",
+                    ephemeral=True
+                )
+
+        opener_id = int(topic.split("|")[0])
+
+        new_topic = f"{opener_id}|claimed:{claimer.id}"
+
+        await channel.edit(topic=new_topic)
+
+        # جعل الإداريين قراءة فقط
         for role_id in ALL_ROLES:
 
             role = guild.get_role(role_id)
@@ -188,7 +202,7 @@ class TicketButtons(View):
                     send_messages=False
                 )
 
-        # السماح فقط للمستلم
+        # السماح للمستلم فقط
         await channel.set_permissions(
             claimer,
             read_messages=True,
@@ -202,7 +216,6 @@ class TicketButtons(View):
 
         await interaction.followup.send(embed=embed)
 
-
     @discord.ui.button(
         label="🔒 إغلاق التكت",
         style=discord.ButtonStyle.red,
@@ -213,7 +226,6 @@ class TicketButtons(View):
         await interaction.response.send_modal(
             CloseModal()
         )
-
 
 # ===============================
 # إنشاء التكت
@@ -226,7 +238,7 @@ async def create_ticket(interaction, ticket_type):
 
     for ch in guild.text_channels:
 
-        if ch.topic == str(user.id):
+        if ch.topic and ch.topic.startswith(str(user.id)):
 
             return await interaction.response.send_message(
                 "❌ لديك تكت مفتوح بالفعل.",
@@ -269,8 +281,6 @@ async def create_ticket(interaction, ticket_type):
             )
     }
 
-    # الإداريين يشوفون التكت من البداية
-
     for role_id in ALL_ROLES:
 
         role = guild.get_role(role_id)
@@ -287,7 +297,7 @@ async def create_ticket(interaction, ticket_type):
         name=ticket_name,
         category=category,
         overwrites=overwrites,
-        topic=str(user.id)
+        topic=f"{user.id}|claimed:0"
 
     )
 
@@ -324,7 +334,6 @@ async def create_ticket(interaction, ticket_type):
         f"✅ تم فتح التكت: {channel.mention}",
         ephemeral=True
     )
-
 
 # ===============================
 # القائمة
@@ -375,13 +384,11 @@ class TicketSelect(Select):
             self.values[0]
         )
 
-
 class TicketPanel(View):
 
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
-
 
 # ===============================
 # أمر لوحة التكت
@@ -401,7 +408,6 @@ async def panel(ctx):
         view=TicketPanel()
     )
 
-
 # ===============================
 # تشغيل البوت
 # ===============================
@@ -413,6 +419,5 @@ async def on_ready():
 
     bot.add_view(TicketPanel())
     bot.add_view(TicketButtons())
-
 
 bot.run(TOKEN)
