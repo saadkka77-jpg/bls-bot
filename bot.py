@@ -1,4 +1,4 @@
-import discord
+\import discord
 from discord.ext import commands
 from discord.ui import View, Select
 import os
@@ -68,6 +68,7 @@ ADMIN_COMPLAINT_ROLES = [
 1490386915629989948
 ]
 
+ALL_ROLES = list(set(SUPPORT_ROLES + ADMIN_COMPLAINT_ROLES))
 
 # ===============================
 # مودال الإغلاق
@@ -114,8 +115,6 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
                 )
             )
 
-        # DM احترافي
-
         try:
 
             opener_id = int(channel.topic)
@@ -127,11 +126,8 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
                     f"👮‍♂️ المسؤول: {interaction.user.mention}\n"
                     f"📝 السبب:\n{reason_text}"
                 ),
-                color=discord.Color.red(),
-                timestamp=datetime.datetime.utcnow()
+                color=discord.Color.red()
             )
-
-            dm.set_footer(text="BLS Ticket System")
 
             await user.send(embed=dm)
 
@@ -160,39 +156,42 @@ class TicketButtons(View):
         await interaction.response.defer()
 
         channel = interaction.channel
+        guild = interaction.guild
         claimer = interaction.user
 
-        allowed_roles = SUPPORT_ROLES + ADMIN_COMPLAINT_ROLES
-
-        if not any(role.id in allowed_roles for role in claimer.roles):
+        if not any(role.id in ALL_ROLES for role in claimer.roles):
 
             return await interaction.followup.send(
-                "❌ لا تملك صلاحية",
+                "❌ لا تملك صلاحية استلام التكت",
                 ephemeral=True
             )
 
         opener_id = int(channel.topic)
 
-        for member in channel.members:
+        opener = guild.get_member(opener_id)
 
-            if member.id == opener_id:
+        if opener:
+
+            await channel.set_permissions(
+                opener,
+                send_messages=True
+            )
+
+        await channel.set_permissions(
+            claimer,
+            send_messages=True
+        )
+
+        # قفل الكتابة عن باقي الرتب
+
+        for role_id in ALL_ROLES:
+
+            role = guild.get_role(role_id)
+
+            if role:
 
                 await channel.set_permissions(
-                    member,
-                    send_messages=True
-                )
-
-            elif member == claimer:
-
-                await channel.set_permissions(
-                    member,
-                    send_messages=True
-                )
-
-            else:
-
-                await channel.set_permissions(
-                    member,
+                    role,
                     send_messages=False
                 )
 
@@ -225,27 +224,45 @@ async def create_ticket(interaction, ticket_type):
     guild = interaction.guild
     user = interaction.user
 
+    # منع فتح أكثر من تكت
+
+    for ch in guild.text_channels:
+
+        if ch.topic == str(user.id):
+
+            return await interaction.response.send_message(
+                "❌ لديك تكت مفتوح بالفعل.",
+                ephemeral=True
+            )
+
     ticket_number = get_ticket_number()
+
+    # تحديد القسم
 
     if ticket_type == "rank":
 
         category_id = RANK_CATEGORY
+        ticket_name = f"ticket-{ticket_number}-rank"
 
     elif ticket_type == "support":
 
         category_id = SUPPORT_CATEGORY
+        ticket_name = f"ticket-{ticket_number}-support"
 
     elif ticket_type == "person":
 
         category_id = PERSON_CATEGORY
+        ticket_name = f"ticket-{ticket_number}-person"
 
     elif ticket_type == "admin":
 
         category_id = ADMIN_CATEGORY
+        ticket_name = f"ticket-{ticket_number}-admin"
 
     elif ticket_type == "shop":
 
         category_id = SHOP_CATEGORY
+        ticket_name = f"ticket-{ticket_number}-shop"
 
     category = guild.get_channel(category_id)
 
@@ -261,9 +278,22 @@ async def create_ticket(interaction, ticket_type):
             )
     }
 
+    # إدخال الرتب داخل التكت من البداية
+
+    for role_id in ALL_ROLES:
+
+        role = guild.get_role(role_id)
+
+        if role:
+
+            overwrites[role] = discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True
+            )
+
     channel = await guild.create_text_channel(
 
-        name=f"ticket-{ticket_number}",
+        name=ticket_name,
         category=category,
         overwrites=overwrites,
         topic=str(user.id)
@@ -274,7 +304,11 @@ async def create_ticket(interaction, ticket_type):
 
     embed = discord.Embed(
         title="🎫 نظام التكت - BLS",
-        description="تم فتح التكت بنجاح، يرجى شرح طلبك.",
+        description=(
+            "تم فتح التكت بنجاح ✅\n\n"
+            "📌 يرجى شرح طلبك بالتفصيل\n"
+            "📎 إرفاق الأدلة إن وجدت"
+        ),
         color=discord.Color.blue()
     )
 
