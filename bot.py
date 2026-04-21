@@ -4,6 +4,7 @@ from discord.ui import View, Select
 import os
 import datetime
 import json
+import io
 
 TOKEN = os.getenv("TOKEN")
 
@@ -99,6 +100,11 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
 
         transcript = "\n".join(messages)
 
+        file = discord.File(
+            io.BytesIO(transcript.encode()),
+            filename="transcript.txt"
+        )
+
         embed = discord.Embed(
             title="📁 Ticket Closed",
             description=f"📝 السبب:\n{reason_text}",
@@ -110,13 +116,8 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
 
             await log_channel.send(
                 embed=embed,
-                file=discord.File(
-                    fp=bytes(transcript, "utf-8"),
-                    filename="transcript.txt"
-                )
+                file=file
             )
-
-        # إرسال DM احترافي
 
         try:
 
@@ -174,7 +175,7 @@ class TicketButtons(View):
 
         opener_id = int(channel.topic)
 
-        # قفل الكتابة عن باقي الرتب
+        # خلي كل الإداريين قراءة فقط
         for role_id in ALL_ROLES:
 
             role = guild.get_role(role_id)
@@ -183,12 +184,14 @@ class TicketButtons(View):
 
                 await channel.set_permissions(
                     role,
+                    read_messages=True,
                     send_messages=False
                 )
 
-        # السماح للمستلم
+        # السماح فقط للمستلم
         await channel.set_permissions(
             claimer,
+            read_messages=True,
             send_messages=True
         )
 
@@ -220,8 +223,6 @@ async def create_ticket(interaction, ticket_type):
 
     guild = interaction.guild
     user = interaction.user
-
-    # منع فتح أكثر من تكت
 
     for ch in guild.text_channels:
 
@@ -268,7 +269,7 @@ async def create_ticket(interaction, ticket_type):
             )
     }
 
-    # إدخال الرتب داخل التكت مباشرة
+    # الإداريين يشوفون التكت من البداية
 
     for role_id in ALL_ROLES:
 
