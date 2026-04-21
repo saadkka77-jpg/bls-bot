@@ -1,13 +1,37 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select, Button
+from discord.ui import View, Select
 import os
 import datetime
+import json
 
 TOKEN = os.getenv("TOKEN")
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ===============================
+# نظام ترقيم التكت
+# ===============================
+
+COUNTER_FILE = "ticket_counter.json"
+
+def get_ticket_number():
+
+    if not os.path.exists(COUNTER_FILE):
+
+        with open(COUNTER_FILE, "w") as f:
+            json.dump({"ticket": 0}, f)
+
+    with open(COUNTER_FILE, "r") as f:
+        data = json.load(f)
+
+    data["ticket"] += 1
+
+    with open(COUNTER_FILE, "w") as f:
+        json.dump(data, f)
+
+    return data["ticket"]
 
 # ===============================
 # إعدادات الرومات
@@ -19,7 +43,8 @@ SHOP_CATEGORY = 1487848330804330699
 SUPPORT_CATEGORY = 1487721982945394728
 ADMIN_CATEGORY = 1487709726765748295
 
-LOG_CHANNEL = 1480456866613170267  # حط روم اللوق هنا
+LOG_CHANNEL = 000000000000000000  # حط روم اللوق هنا
+
 
 # ===============================
 # الرتب
@@ -66,7 +91,7 @@ MESSAGES = {
 "support":
 """🛠️ **حياك الله في الدعم الفني الخاص بـ BLS**
 
-اكتب شرح مشكلتك بالتفصيل وسيتم الرد عليك قريبًا.
+اكتب شرح مشكلتك بالتفصيل.
 """,
 
 "person":
@@ -75,8 +100,8 @@ MESSAGES = {
 📌 **اكتب ملخص الشكوى**
 
 ❌ **أسباب رفض الشكوى:**
-• مرور 24 ساعة على الحادثة  
-• عدم وجود دليل أو إثبات  
+• مرور 24 ساعة  
+• عدم وجود دليل  
 """,
 
 "admin":
@@ -85,29 +110,150 @@ MESSAGES = {
 📌 اكتب ملخص الشكوى و أرفق الدليل
 
 ❌ **أسباب الرفض:**
-🔴 مرور 24 ساعة على الشكوى  
+🔴 مرور 24 ساعة  
 🔴 عدم وجود دليل  
 """,
 
 "shop":
 """🛒 **تكت متجر**
 
-📌 اكتب اسم المنتج المطلوب
+📌 اكتب اسم المنتج
 
-⚠️ في حال عدم الرد خلال 24 ساعة  
-سيتم إلغاء الطلب.
+⚠️ عدم الرد خلال 24 ساعة  
+يؤدي لإلغاء الطلب.
 """
 }
 
 
 # ===============================
-# إنشاء التكت
+# مودال الإغلاق
+# ===============================
+
+class CloseModal(discord.ui.Modal, title="إغلاق التكت"):
+
+    reason = discord.ui.TextInput(
+        label="سبب إغلاق التكت",
+        placeholder="اكتب السبب هنا...",
+        required=True,
+        style=discord.TextStyle.paragraph
+    )
+
+    async def on_submit(self, interaction):
+
+        channel = interaction.channel
+        reason_text = self.reason.value
+
+        log_channel = bot.get_channel(LOG_CHANNEL)
+
+        messages = []
+
+        async for m in channel.history(limit=None):
+            messages.append(f"{m.author}: {m.content}")
+
+        transcript = "\n".join(messages)
+
+        embed = discord.Embed(
+            title="📁 Ticket Closed",
+            description=f"**السبب:** {reason_text}",
+            color=discord.Color.red(),
+            timestamp=datetime.datetime.utcnow()
+        )
+
+        if log_channel:
+
+            await log_channel.send(
+                embed=embed,
+                file=discord.File(
+                    fp=bytes(transcript, "utf-8"),
+                    filename="transcript.txt"
+                )
+            )
+
+        try:
+
+            opener_id = int(channel.topic)
+            user = await bot.fetch_user(opener_id)
+
+            await user.send(
+                f"🔒 تم إغلاق التكت بواسطة {interaction.user.mention}\n"
+                f"📌 السبب: {reason_text}"
+            )
+
+        except:
+            pass
+
+        await channel.delete()
+
+
+# ===============================
+# أزرار التكت
+# ===============================
+
+class TicketButtons(View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="📌 استلام التكت",
+        style=discord.ButtonStyle.green
+    )
+    async def claim_ticket(self, interaction, button):
+
+        channel = interaction.channel
+        claimer = interaction.user
+
+        opener_id = int(channel.topic)
+
+        for member in channel.members:
+
+            if member.id == opener_id:
+
+                await channel.set_permissions(
+                    member,
+                    send_messages=True
+                )
+
+            elif member == claimer:
+
+                await channel.set_permissions(
+                    member,
+                    send_messages=True
+                )
+
+            else:
+
+                await channel.set_permissions(
+                    member,
+                    send_messages=False
+                )
+
+        await interaction.response.send_message(
+            f"✅ تم استلام التكت بواسطة {claimer.mention}"
+        )
+
+
+    @discord.ui.button(
+        label="🔒 إغلاق التكت",
+        style=discord.ButtonStyle.red
+    )
+    async def close_ticket(self, interaction, button):
+
+        await interaction.response.send_modal(
+            CloseModal()
+        )
+
+
+# ===============================
+# إنشاء التكت (مع الترقيم)
 # ===============================
 
 async def create_ticket(interaction, ticket_type):
 
     guild = interaction.guild
     user = interaction.user
+
+    ticket_number = get_ticket_number()
 
     if ticket_type == "rank":
         category_id = RANK_CATEGORY
@@ -132,138 +278,60 @@ async def create_ticket(interaction, ticket_type):
     category = guild.get_channel(category_id)
 
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        guild.default_role:
+            discord.PermissionOverwrite(read_messages=False),
+
+        user:
+            discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True
+            )
     }
 
     for role_id in roles:
+
         role = guild.get_role(role_id)
+
         overwrites[role] = discord.PermissionOverwrite(
             read_messages=True,
             send_messages=False
         )
 
     channel = await guild.create_text_channel(
-        name=f"ticket-{user.name}",
+
+        name=f"ticket-{ticket_number}",
         category=category,
-        overwrites=overwrites
+        overwrites=overwrites,
+        topic=str(user.id)
+
     )
 
     view = TicketButtons()
 
     await channel.send(
+
         f"{user.mention}",
+
         embed=discord.Embed(
             description=MESSAGES[ticket_type],
             color=discord.Color.blue()
         ),
+
         view=view
+
     )
 
     await interaction.response.send_message(
+
         f"✅ تم فتح التكت: {channel.mention}",
         ephemeral=True
+
     )
 
 
 # ===============================
-# أزرار التكت
-# ===============================
-
-class TicketButtons(View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="📌 استلام التكت",
-        style=discord.ButtonStyle.green
-    )
-    async def claim_ticket(self, interaction, button):
-
-        role_ids = [r.id for r in interaction.user.roles]
-
-        channel = interaction.channel
-
-        for member in channel.members:
-
-            if member == interaction.user:
-                await channel.set_permissions(
-                    member,
-                    send_messages=True
-                )
-
-            elif member != interaction.guild.owner:
-                await channel.set_permissions(
-                    member,
-                    send_messages=False
-                )
-
-        await interaction.response.send_message(
-            f"✅ تم استلام التكت بواسطة {interaction.user.mention}"
-        )
-
-
-    @discord.ui.button(
-        label="🔒 إغلاق التكت",
-        style=discord.ButtonStyle.red
-    )
-    async def close_ticket(self, interaction, button):
-
-        await interaction.response.send_message(
-            "✏️ اكتب سبب إغلاق التكت..."
-        )
-
-        def check(m):
-            return m.author == interaction.user
-
-        msg = await bot.wait_for("message", check=check)
-
-        reason = msg.content
-
-        channel = interaction.channel
-
-        log_channel = bot.get_channel(LOG_CHANNEL)
-
-        messages = []
-
-        async for m in channel.history(limit=None):
-            messages.append(f"{m.author}: {m.content}")
-
-        transcript = "\n".join(messages)
-
-        embed = discord.Embed(
-            title="📁 Ticket Log",
-            description=f"**Reason:** {reason}",
-            color=discord.Color.red(),
-            timestamp=datetime.datetime.utcnow()
-        )
-
-        await log_channel.send(
-            embed=embed,
-            file=discord.File(
-                fp=bytes(transcript, "utf-8"),
-                filename="transcript.txt"
-            )
-        )
-
-        opener = channel.topic
-
-        try:
-            user = await bot.fetch_user(int(opener))
-
-            await user.send(
-                f"🔒 تم إغلاق التكت بواسطة {interaction.user.mention}\n"
-                f"📌 السبب: {reason}"
-            )
-        except:
-            pass
-
-        await channel.delete()
-
-
-# ===============================
-# قائمة التكت
+# القائمة
 # ===============================
 
 class TicketSelect(Select):
@@ -320,7 +388,7 @@ class TicketPanel(View):
 
 
 # ===============================
-# أمر إرسال لوحة التكت
+# أمر لوحة التكت
 # ===============================
 
 @bot.command()
@@ -328,7 +396,7 @@ async def panel(ctx):
 
     embed = discord.Embed(
         title="🎫 نظام التكت - BLS",
-        description="اختر القسم المناسب من القائمة بالأسفل",
+        description="اختر القسم المناسب من القائمة",
         color=discord.Color.blue()
     )
 
@@ -344,6 +412,11 @@ async def panel(ctx):
 
 @bot.event
 async def on_ready():
+
     print(f"✅ Logged in as {bot.user}")
+
+    bot.add_view(TicketPanel())
+    bot.add_view(TicketButtons())
+
 
 bot.run(TOKEN)
