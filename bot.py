@@ -12,7 +12,7 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ===============================
-# نظام ترقيم التكت
+# نظام الترقيم
 # ===============================
 
 COUNTER_FILE = "ticket_counter.json"
@@ -20,7 +20,6 @@ COUNTER_FILE = "ticket_counter.json"
 def get_ticket_number():
 
     if not os.path.exists(COUNTER_FILE):
-
         with open(COUNTER_FILE, "w") as f:
             json.dump({"ticket": 0}, f)
 
@@ -35,7 +34,7 @@ def get_ticket_number():
     return data["ticket"]
 
 # ===============================
-# إعدادات الرومات
+# الإعدادات
 # ===============================
 
 RANK_CATEGORY = 1494665237717323907
@@ -45,10 +44,6 @@ SUPPORT_CATEGORY = 1487721982945394728
 ADMIN_CATEGORY = 1487709726765748295
 
 LOG_CHANNEL = 1480456866613170267
-
-# ===============================
-# الرتب
-# ===============================
 
 SUPPORT_ROLES = [
 1477492633847857252,
@@ -60,24 +55,18 @@ SUPPORT_ROLES = [
 1490386915629989948
 ]
 
-ADMIN_COMPLAINT_ROLES = [
-1478970736717598840,
-1495873706923393205,
-1478971845729583276,
-1490386915629989948
-]
+ADMIN_COMPLAINT_ROLES = SUPPORT_ROLES
 
 ALL_ROLES = list(set(SUPPORT_ROLES + ADMIN_COMPLAINT_ROLES))
 
 # ===============================
-# مودال الإغلاق
+# الإغلاق
 # ===============================
 
 class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
 
     reason = discord.ui.TextInput(
-        label="سبب إغلاق التكت",
-        placeholder="اكتب السبب هنا...",
+        label="سبب الإغلاق",
         style=discord.TextStyle.paragraph
     )
 
@@ -88,48 +77,38 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
         channel = interaction.channel
         reason_text = self.reason.value
 
-        log_channel = bot.get_channel(LOG_CHANNEL)
+        log = bot.get_channel(LOG_CHANNEL)
 
         messages = []
 
-        async for m in channel.history(limit=None):
+        async for m in channel.history(limit=200):
             messages.append(f"{m.author}: {m.content}")
 
         transcript = "\n".join(messages)
 
-        file = discord.File(
-            io.BytesIO(transcript.encode()),
-            filename="transcript.txt"
-        )
+        file = discord.File(io.BytesIO(transcript.encode()), filename="transcript.txt")
 
         embed = discord.Embed(
             title="📁 Ticket Closed",
-            description=f"📝 السبب:\n{reason_text}",
+            description=f"**Reason:** {reason_text}",
             color=discord.Color.red(),
             timestamp=datetime.datetime.now(datetime.UTC)
         )
 
-        if log_channel:
-
-            await log_channel.send(
-                embed=embed,
-                file=file
-            )
+        if log:
+            await log.send(embed=embed, file=file)
 
         try:
-
             opener_id = int(channel.topic.split("|")[0])
             user = await bot.fetch_user(opener_id)
-
             await user.send(embed=embed)
-
         except:
             pass
 
         await channel.delete()
 
 # ===============================
-# أزرار التكت
+# الأزرار
 # ===============================
 
 class TicketButtons(View):
@@ -138,7 +117,7 @@ class TicketButtons(View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="📌 استلام التكت",
+        label="📌 Claim Ticket",
         style=discord.ButtonStyle.green,
         custom_id="claim_ticket"
     )
@@ -148,66 +127,52 @@ class TicketButtons(View):
 
         channel = interaction.channel
         guild = interaction.guild
-        claimer = interaction.user
+        user = interaction.user
 
-        if not any(role.id in ALL_ROLES for role in claimer.roles):
+        if not any(r.id in ALL_ROLES for r in user.roles):
+            return await interaction.followup.send("❌ No permission", ephemeral=True)
 
-            return await interaction.followup.send(
-                "❌ لا تملك صلاحية",
-                ephemeral=True
-            )
+        if not channel.topic:
+            return await interaction.followup.send("❌ Invalid ticket", ephemeral=True)
 
-        topic = channel.topic
+        opener_id, claimed = channel.topic.split("|")
 
-        if "|claimed:" in topic:
+        if "claimed:" in claimed:
+            claimed_id = int(claimed.split(":")[1])
 
-            claimed_id = int(topic.split("|claimed:")[1])
-
-            if claimed_id != 0 and claimed_id != claimer.id:
-
+            if claimed_id != 0:
                 return await interaction.followup.send(
-                    "❌ التكت مستلم بالفعل",
+                    "❌ Ticket already claimed",
                     ephemeral=True
                 )
 
-        opener_id = int(topic.split("|")[0])
-
-        new_topic = f"{opener_id}|claimed:{claimer.id}"
-
+        new_topic = f"{opener_id}|claimed:{user.id}"
         await channel.edit(topic=new_topic)
 
-        for role_id in ALL_ROLES:
-
-            role = guild.get_role(role_id)
-
+        # قفل الإداريين
+        for r_id in ALL_ROLES:
+            role = guild.get_role(r_id)
             if role:
+                await channel.set_permissions(role, send_messages=False)
 
-                await channel.set_permissions(
-                    role,
-                    read_messages=True,
-                    send_messages=False
-                )
+        await channel.set_permissions(user, send_messages=True)
 
-        await channel.set_permissions(
-            claimer,
-            read_messages=True,
-            send_messages=True
+        embed = discord.Embed(
+            title="📌 Ticket Claimed",
+            description=f"Claimed by {user.mention}",
+            color=discord.Color.green()
         )
 
-        await interaction.followup.send(
-            f"📌 تم استلام التكت بواسطة {claimer.mention}"
-        )
+        await interaction.followup.send(embed=embed)
 
     @discord.ui.button(
-        label="🔒 إغلاق التكت",
+        label="🔒 Close",
         style=discord.ButtonStyle.red,
         custom_id="close_ticket"
     )
     async def close_ticket(self, interaction, button):
 
-        await interaction.response.send_modal(
-            CloseModal()
-        )
+        await interaction.response.send_modal(CloseModal())
 
 # ===============================
 # إنشاء التكت
@@ -219,89 +184,52 @@ async def create_ticket(interaction, ticket_type):
     user = interaction.user
 
     for ch in guild.text_channels:
-
         if ch.topic and ch.topic.startswith(str(user.id)):
-
-            return await interaction.response.send_message(
-                "❌ لديك تكت مفتوح",
-                ephemeral=True
-            )
+            return await interaction.response.send_message("❌ لديك تكت مفتوح", ephemeral=True)
 
     ticket_number = get_ticket_number()
 
-    if ticket_type == "support":
-        category_id = SUPPORT_CATEGORY
-        ticket_name = f"ticket-{ticket_number}-support"
-
-    elif ticket_type == "shop":
-        category_id = SHOP_CATEGORY
-        ticket_name = f"ticket-{ticket_number}-shop"
-
-    elif ticket_type == "admin":
-        category_id = ADMIN_CATEGORY
-        ticket_name = f"ticket-{ticket_number}-admin"
-
-    elif ticket_type == "rank":
-        category_id = RANK_CATEGORY
-        ticket_name = f"ticket-{ticket_number}-rank"
-
-    elif ticket_type == "person":
-        category_id = PERSON_CATEGORY
-        ticket_name = f"ticket-{ticket_number}-person"
-
-    category = guild.get_channel(category_id)
-
-    overwrites = {
-
-        guild.default_role:
-            discord.PermissionOverwrite(read_messages=False),
-
-        user:
-            discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            )
+    categories = {
+        "support": SUPPORT_CATEGORY,
+        "shop": SHOP_CATEGORY,
+        "admin": ADMIN_CATEGORY,
+        "rank": RANK_CATEGORY,
+        "person": PERSON_CATEGORY
     }
 
-    for role_id in ALL_ROLES:
+    category = guild.get_channel(categories[ticket_type])
+    name = f"ticket-{ticket_number}-{ticket_type}"
 
-        role = guild.get_role(role_id)
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    }
 
+    for r in ALL_ROLES:
+        role = guild.get_role(r)
         if role:
-
-            overwrites[role] = discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            )
+            overwrites[role] = discord.PermissionOverwrite(read_messages=True)
 
     channel = await guild.create_text_channel(
-
-        name=ticket_name,
+        name=name,
         category=category,
         overwrites=overwrites,
         topic=f"{user.id}|claimed:0"
-
     )
 
-    view = TicketButtons()
-
     embed = discord.Embed(
-        title="🎫 نظام التكت - BLS",
-        description="✅ تم فتح التكت",
+        title="🎫 Ticket System",
+        description="Please describe your issue",
         color=discord.Color.blue(),
         timestamp=datetime.datetime.now(datetime.UTC)
     )
 
-    await channel.send(
-        content=user.mention,
-        embed=embed,
-        view=view
-    )
+    embed.add_field(name="Ticket ID", value=str(ticket_number), inline=True)
+    embed.add_field(name="Status", value="🟢 Open", inline=True)
 
-    await interaction.response.send_message(
-        f"✅ تم فتح التكت: {channel.mention}",
-        ephemeral=True
-    )
+    await channel.send(content=user.mention, embed=embed, view=TicketButtons())
+
+    await interaction.response.send_message(f"✅ Created: {channel.mention}", ephemeral=True)
 
 # ===============================
 # القائمة
@@ -312,46 +240,21 @@ class TicketSelect(Select):
     def __init__(self):
 
         options = [
-
-            discord.SelectOption(
-                label="الدعم الفني",
-                value="support"
-            ),
-
-            discord.SelectOption(
-                label="المتجر",
-                value="shop"
-            ),
-
-            discord.SelectOption(
-                label="شكوى على إداري",
-                value="admin"
-            ),
-
-            discord.SelectOption(
-                label="تكت رانك",
-                value="rank"
-            ),
-
-            discord.SelectOption(
-                label="شكوى على شخص",
-                value="person"
-            )
-
+            discord.SelectOption(label="Support", value="support"),
+            discord.SelectOption(label="Shop", value="shop"),
+            discord.SelectOption(label="Admin", value="admin"),
+            discord.SelectOption(label="Rank", value="rank"),
+            discord.SelectOption(label="Person", value="person"),
         ]
 
         super().__init__(
-            placeholder="اختر نوع التكت",
+            placeholder="Choose ticket type",
             options=options,
-            custom_id="ticket_select_menu"
+            custom_id="ticket_menu"
         )
 
     async def callback(self, interaction):
-
-        await create_ticket(
-            interaction,
-            self.values[0]
-        )
+        await create_ticket(interaction, self.values[0])
 
 class TicketPanel(View):
 
@@ -360,32 +263,27 @@ class TicketPanel(View):
         self.add_item(TicketSelect())
 
 # ===============================
-# أمر لوحة التكت
+# أمر البانل
 # ===============================
 
 @bot.command()
 async def panel(ctx):
 
     embed = discord.Embed(
-        title="🎫 نظام التكت - BLS",
-        description="اختر القسم",
+        title="🎫 Ticket System",
+        description="Select a category below",
         color=discord.Color.blue()
     )
 
-    await ctx.send(
-        embed=embed,
-        view=TicketPanel()
-    )
+    await ctx.send(embed=embed, view=TicketPanel())
 
 # ===============================
-# تشغيل البوت
+# تشغيل
 # ===============================
 
 @bot.event
 async def on_ready():
-
-    print(f"✅ Logged in as {bot.user}")
-
+    print(f"Logged in as {bot.user}")
     bot.add_view(TicketPanel())
     bot.add_view(TicketButtons())
 
