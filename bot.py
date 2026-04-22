@@ -106,9 +106,12 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
             await log.send(embed=embed, file=file)
 
         try:
-            opener_id = int(channel.topic)
+
+            opener_id = int(channel.topic.split("|")[0])
             user = await bot.fetch_user(opener_id)
+
             await user.send(embed=embed)
+
         except:
             pass
 
@@ -143,10 +146,33 @@ class TicketButtons(View):
                 ephemeral=True
             )
 
-        opener_id = int(channel.topic)
-        opener = guild.get_member(opener_id)
+        if "|" not in channel.topic:
 
-        # 👇 هنا الإصلاح الحقيقي
+            return await interaction.followup.send(
+                "❌ خطأ في بيانات التكت",
+                ephemeral=True
+            )
+
+        opener_id, claimed_id = channel.topic.split("|")
+
+        # ✅ التحقق هل التكت مستلمة
+
+        if claimed_id != "0":
+
+            return await interaction.followup.send(
+                "❌ التكت مستلمة بالفعل",
+                ephemeral=True
+            )
+
+        opener = guild.get_member(int(opener_id))
+
+        # حفظ المستلم
+
+        new_topic = f"{opener_id}|{claimer.id}"
+
+        await channel.edit(topic=new_topic)
+
+        # جعل الإداريين يشوفون فقط
 
         for role_id in ALL_ROLES:
 
@@ -160,7 +186,7 @@ class TicketButtons(View):
                     send_messages=False
                 )
 
-        # السماح للمستلم بالكتابة
+        # السماح للمستلم
 
         await channel.set_permissions(
             claimer,
@@ -207,7 +233,7 @@ async def create_ticket(interaction, ticket_type):
 
     for ch in guild.text_channels:
 
-        if ch.topic == str(user.id):
+        if ch.topic and ch.topic.startswith(str(user.id)):
 
             return await interaction.response.send_message(
                 "❌ لديك تكت مفتوح بالفعل",
@@ -270,7 +296,10 @@ async def create_ticket(interaction, ticket_type):
         name=ticket_name,
         category=category,
         overwrites=overwrites,
-        topic=str(user.id)
+
+        # 👇 topic فيه صاحب التكت + مستلم = 0
+
+        topic=f"{user.id}|0"
 
     )
 
@@ -409,7 +438,7 @@ async def panel(ctx):
     )
 
 # ===============================
-# أمر إضافة عضو للتكت
+# أمر إضافة عضو
 # ===============================
 
 @bot.command()
@@ -422,7 +451,7 @@ async def add(ctx, member: discord.Member):
     )
 
     await ctx.send(
-        f"✅ تم إضافة {member.mention} إلى التكت"
+        f"✅ تم إضافة {member.mention}"
     )
 
 # ===============================
