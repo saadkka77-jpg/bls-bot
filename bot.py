@@ -106,6 +106,11 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
         channel = interaction.channel
         log = bot.get_channel(LOG_CHANNEL)
 
+        opener_id = None
+
+        if channel.topic and "|" in channel.topic:
+            opener_id = channel.topic.split("|")[0]
+
         messages = []
 
         async for m in channel.history(limit=200):
@@ -127,6 +132,21 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
 
         if log:
             await log.send(embed=embed, file=file)
+
+        # إرسال رسالة خاصة لصاحب التكت
+        try:
+
+            if opener_id:
+
+                user = await bot.fetch_user(int(opener_id))
+
+                await user.send(
+                    "📁 تم إغلاق تذكرتك.\n"
+                    f"📌 السبب: {self.reason.value}"
+                )
+
+        except:
+            pass
 
         await channel.delete()
 
@@ -154,25 +174,42 @@ class TicketButtons(View):
             )
 
         channel = interaction.channel
+        guild = interaction.guild
 
-        # منع استلام التكت مرتين
-        if channel.topic and "|" in channel.topic:
+        opener, claimed = channel.topic.split("|")
 
-            opener, claimed = channel.topic.split("|")
+        if claimed != "0":
 
-            if claimed != "0":
+            user = await bot.fetch_user(int(claimed))
 
-                user = await bot.fetch_user(int(claimed))
+            return await interaction.response.send_message(
+                f"❌ التكت مستلمة بالفعل بواسطة {user.mention}",
+                ephemeral=True
+            )
 
-                return await interaction.response.send_message(
-                    f"❌ التكت مستلمة بالفعل بواسطة {user.mention}",
-                    ephemeral=True
+        # تسجيل المستلم
+        new_topic = f"{opener}|{interaction.user.id}"
+        await channel.edit(topic=new_topic)
+
+        # منع باقي الإداريين من الكتابة
+        for role_id in ALL_ROLES:
+
+            role = guild.get_role(role_id)
+
+            if role:
+
+                await channel.set_permissions(
+                    role,
+                    read_messages=True,
+                    send_messages=False
                 )
 
-            # تسجيل المستلم
-            new_topic = f"{opener}|{interaction.user.id}"
-
-            await channel.edit(topic=new_topic)
+        # السماح فقط للمستلم
+        await channel.set_permissions(
+            interaction.user,
+            read_messages=True,
+            send_messages=True
+        )
 
         embed = discord.Embed(
             title="📌 تم استلام التكت",
@@ -270,8 +307,8 @@ async def create_ticket(interaction, ticket_type):
         description=(
             "📜 **قوانين التكت:**\n"
             "• اشرح مشكلتك بوضوح\n"
-            "• لا تزعج الإدارة\n"
-            "• احترام الجميع واجب\n\n"
+            "• احترام الإدارة\n"
+            "• يمنع الإزعاج\n\n"
             "⏳ سيتم الرد عليك قريباً"
         ),
 
@@ -295,52 +332,6 @@ async def create_ticket(interaction, ticket_type):
         f"✅ تم فتح التكت: {channel.mention}",
         ephemeral=True
     )
-
-# ===============================
-# أمر إضافة إداري للتكت
-# ===============================
-
-@bot.command()
-async def add(ctx, member: discord.Member):
-
-    if not ctx.channel.name.startswith("ticket"):
-
-        return await ctx.send(
-            "❌ هذا الأمر داخل التكت فقط"
-        )
-
-    if not any(role.id in ALL_ROLES for role in ctx.author.roles):
-
-        return await ctx.send(
-            "❌ لا تملك صلاحية"
-        )
-
-    await ctx.channel.set_permissions(
-
-        member,
-
-        read_messages=True,
-        send_messages=True,
-        attach_files=True,
-        embed_links=True
-
-    )
-
-    embed = discord.Embed(
-
-        title="➕ تم إضافة إداري",
-
-        description=(
-            f"👤 العضو: {member.mention}\n"
-            f"🛡️ بواسطة: {ctx.author.mention}"
-        ),
-
-        color=discord.Color.green(),
-        timestamp=datetime.datetime.now(datetime.UTC)
-
-    )
-
-    await ctx.send(embed=embed)
 
 # ===============================
 # القائمة
