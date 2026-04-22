@@ -8,7 +8,10 @@ import io
 
 TOKEN = os.getenv("TOKEN")
 
-# ✅ مهم لتشغيل الأوامر النصية
+# ===============================
+# إعداد البوت
+# ===============================
+
 intents = discord.Intents.all()
 intents.message_content = True
 
@@ -101,7 +104,7 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
             title="📁 تم إغلاق التكت",
             description=f"📌 السبب:\n{self.reason.value}",
             color=discord.Color.red(),
-            timestamp=datetime.datetime.utcnow()
+            timestamp=datetime.datetime.now(datetime.UTC)
         )
 
         if log:
@@ -170,8 +173,6 @@ class TicketButtons(View):
 
         await channel.edit(topic=new_topic)
 
-        # جعل الإداريين يشوفون فقط
-
         for role_id in ALL_ROLES:
 
             role = guild.get_role(role_id)
@@ -184,15 +185,11 @@ class TicketButtons(View):
                     send_messages=False
                 )
 
-        # السماح للمستلم
-
         await channel.set_permissions(
             claimer,
             read_messages=True,
             send_messages=True
         )
-
-        # السماح لصاحب التكت
 
         if opener:
 
@@ -276,11 +273,8 @@ async def create_ticket(interaction, ticket_type):
     }
 
     if ticket_type in ["shop", "admin"]:
-
         roles_to_add = SPECIAL_ROLES
-
     else:
-
         roles_to_add = SUPPORT_ROLES
 
     for r in roles_to_add:
@@ -312,7 +306,7 @@ async def create_ticket(interaction, ticket_type):
         ),
 
         color=discord.Color.blue(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now(datetime.UTC)
 
     )
 
@@ -329,7 +323,6 @@ async def create_ticket(interaction, ticket_type):
     )
 
     if guild.icon:
-
         embed.set_thumbnail(
             url=guild.icon.url
         )
@@ -350,7 +343,7 @@ async def create_ticket(interaction, ticket_type):
     )
 
 # ===============================
-# القائمة
+# القائمة (تم إصلاح الخطأ هنا)
 # ===============================
 
 class TicketSelect(Select):
@@ -388,7 +381,8 @@ class TicketSelect(Select):
 
         super().__init__(
             placeholder="اختر نوع التكت",
-            options=options
+            options=options,
+            custom_id="ticket_select_menu"  # ✅ إصلاح الخطأ
         )
 
     async def callback(self, interaction):
