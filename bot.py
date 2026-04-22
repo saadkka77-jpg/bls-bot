@@ -8,7 +8,9 @@ import io
 
 TOKEN = os.getenv("TOKEN")
 
+# ✅ مهم لتشغيل الأوامر النصية
 intents = discord.Intents.all()
+intents.message_content = True
 
 bot = commands.Bot(
     command_prefix="!",
@@ -155,8 +157,6 @@ class TicketButtons(View):
 
         opener_id, claimed_id = channel.topic.split("|")
 
-        # ✅ التحقق هل التكت مستلمة
-
         if claimed_id != "0":
 
             return await interaction.followup.send(
@@ -165,8 +165,6 @@ class TicketButtons(View):
             )
 
         opener = guild.get_member(int(opener_id))
-
-        # حفظ المستلم
 
         new_topic = f"{opener_id}|{claimer.id}"
 
@@ -252,9 +250,14 @@ async def create_ticket(interaction, ticket_type):
 
     }
 
-    category = guild.get_channel(
-        categories[ticket_type]
-    )
+    category = guild.get_channel(categories[ticket_type])
+
+    if category is None:
+
+        return await interaction.response.send_message(
+            "❌ خطأ في إعدادات الكاتيجوري",
+            ephemeral=True
+        )
 
     ticket_name = f"ticket-{ticket_number}"
 
@@ -296,9 +299,6 @@ async def create_ticket(interaction, ticket_type):
         name=ticket_name,
         category=category,
         overwrites=overwrites,
-
-        # 👇 topic فيه صاحب التكت + مستلم = 0
-
         topic=f"{user.id}|0"
 
     )
@@ -409,7 +409,7 @@ class TicketPanel(View):
         )
 
 # ===============================
-# أمر فتح اللوحة
+# أمر فتح لوحة التكت
 # ===============================
 
 @bot.command()
