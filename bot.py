@@ -50,16 +50,12 @@ ADMIN_CATEGORY = 1487709726765748295
 
 LOG_CHANNEL = 1480456866613170267
 
-# رتب الدعم العامة
-
 SUPPORT_ROLES = [
 1477492633847857252,
 1482194383515422752,
 1480443913557905499,
 1478970736717598840
 ]
-
-# رتب خاصة فقط للمتجر و شكوى إداري
 
 SPECIAL_ROLES = [
 1490386915629989948,
@@ -85,7 +81,6 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
         await interaction.response.defer()
 
         channel = interaction.channel
-
         log = bot.get_channel(LOG_CHANNEL)
 
         messages = []
@@ -139,9 +134,9 @@ class TicketButtons(View):
 
         channel = interaction.channel
         guild = interaction.guild
-        user = interaction.user
+        claimer = interaction.user
 
-        if not any(r.id in ALL_ROLES for r in user.roles):
+        if not any(r.id in ALL_ROLES for r in claimer.roles):
 
             return await interaction.followup.send(
                 "❌ لا تملك صلاحية",
@@ -149,37 +144,42 @@ class TicketButtons(View):
             )
 
         opener_id = int(channel.topic)
-
         opener = guild.get_member(opener_id)
 
-        # منع الكتابة عن الإداريين
-        for r_id in ALL_ROLES:
+        # 👇 هنا الإصلاح الحقيقي
 
-            role = guild.get_role(r_id)
+        for role_id in ALL_ROLES:
+
+            role = guild.get_role(role_id)
 
             if role:
 
                 await channel.set_permissions(
                     role,
+                    read_messages=True,
                     send_messages=False
                 )
 
-        # السماح للمستلم
+        # السماح للمستلم بالكتابة
+
         await channel.set_permissions(
-            user,
+            claimer,
+            read_messages=True,
             send_messages=True
         )
 
         # السماح لصاحب التكت
+
         if opener:
 
             await channel.set_permissions(
                 opener,
+                read_messages=True,
                 send_messages=True
             )
 
         embed = discord.Embed(
-            description=f"📌 تم استلام التكت بواسطة {user.mention}",
+            description=f"📌 تم استلام التكت بواسطة {claimer.mention}",
             color=discord.Color.green()
         )
 
@@ -245,8 +245,6 @@ async def create_ticket(interaction, ticket_type):
                 send_messages=True
             )
     }
-
-    # رتب حسب نوع التكت
 
     if ticket_type in ["shop", "admin"]:
 
@@ -323,7 +321,7 @@ async def create_ticket(interaction, ticket_type):
     )
 
 # ===============================
-# قائمة التكت
+# القائمة
 # ===============================
 
 class TicketSelect(Select):
@@ -391,7 +389,7 @@ async def panel(ctx):
     embed = discord.Embed(
 
         title="🎫 نظام التكت",
-        description="اختر القسم المناسب من القائمة",
+        description="اختر القسم المناسب",
 
         color=discord.Color.blue()
 
@@ -416,9 +414,6 @@ async def panel(ctx):
 
 @bot.command()
 async def add(ctx, member: discord.Member):
-
-    if ctx.channel.topic is None:
-        return
 
     await ctx.channel.set_permissions(
         member,
