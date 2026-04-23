@@ -89,6 +89,33 @@ SPECIAL_ROLES = [
 ALL_ROLES = list(set(SUPPORT_ROLES + SPECIAL_ROLES))
 
 # ===============================
+# أمر إضافة عضو للتكت
+# ===============================
+
+@bot.command()
+async def add(ctx, member: discord.Member):
+
+    if not any(r.id in ALL_ROLES for r in ctx.author.roles):
+        return await ctx.send("❌ لا تملك صلاحية لاستخدام هذا الأمر.")
+
+    channel = ctx.channel
+
+    await channel.set_permissions(
+        member,
+        read_messages=True,
+        send_messages=True
+    )
+
+    embed = discord.Embed(
+        title="➕ تم إضافة عضو",
+        description=f"تم إضافة {member.mention} إلى التكت بنجاح.",
+        color=discord.Color.green(),
+        timestamp=datetime.datetime.now(datetime.UTC)
+    )
+
+    await ctx.send(embed=embed)
+
+# ===============================
 # إغلاق التكت
 # ===============================
 
