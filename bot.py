@@ -133,17 +133,29 @@ class CloseModal(discord.ui.Modal, title="🔒 إغلاق التكت"):
         if log:
             await log.send(embed=embed, file=file)
 
-        # إرسال رسالة خاصة لصاحب التكت
+        # ===============================
+        # رسالة خاصة احترافية
+        # ===============================
+
         try:
 
             if opener_id:
 
                 user = await bot.fetch_user(int(opener_id))
 
-                await user.send(
-                    "📁 تم إغلاق تذكرتك.\n"
-                    f"📌 السبب: {self.reason.value}"
+                private_embed = discord.Embed(
+                    title="📁 تم إغلاق تذكرتك",
+                    description=(
+                        "نشكر تواصلك معنا 💙\n\n"
+                        f"📌 **سبب الإغلاق:**\n{self.reason.value}\n\n"
+                        "⭐ **تشرفنا في خدمتك في سيرفر BLS**\n"
+                        "نتمنى لك تجربة ممتعة معنا دائماً."
+                    ),
+                    color=discord.Color.blue(),
+                    timestamp=datetime.datetime.now(datetime.UTC)
                 )
+
+                await user.send(embed=private_embed)
 
         except:
             pass
@@ -187,11 +199,9 @@ class TicketButtons(View):
                 ephemeral=True
             )
 
-        # تسجيل المستلم
         new_topic = f"{opener}|{interaction.user.id}"
         await channel.edit(topic=new_topic)
 
-        # منع باقي الإداريين من الكتابة
         for role_id in ALL_ROLES:
 
             role = guild.get_role(role_id)
@@ -204,7 +214,6 @@ class TicketButtons(View):
                     send_messages=False
                 )
 
-        # السماح فقط للمستلم
         await channel.set_permissions(
             interaction.user,
             read_messages=True,
